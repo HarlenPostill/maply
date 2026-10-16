@@ -100,9 +100,9 @@ def geodesic_distance(lon1: float, lat1: float, lon2: float, lat2: float) -> flo
 # Side-of-street convention
 #
 # "left" and "right" are ALWAYS relative to the stored direction of a segment
-# (first vertex -> last vertex), never relative to a worker's travel
-# direction. A view whose heading points to the left of the segment bearing
-# is a left-side view even if a worker approaches from the other end.
+# (first vertex -> last vertex), never relative to the direction someone
+# travels. A view whose heading points to the left of the segment bearing
+# is a left-side view even when approached from the other end.
 # --------------------------------------------------------------------------
 
 SIDE_LEFT = "left"

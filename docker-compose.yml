@@ -1,19 +1,6 @@
-# Local-only stack. Every published port is bound to 127.0.0.1.
-# Data lives in ./data (bind mount, gitignored) and the named volume `pgdata`.
-# Nothing in ./data is ever copied into an image (see .dockerignore).
+# maply: the database and the app, both on 127.0.0.1 only.
+# Job folders (photos, prompts, Codex logs) live in ./data on your Mac.
 name: maply
-
-x-app-env: &app-env
-  DATABASE_URL: postgresql+psycopg://maply:${POSTGRES_PASSWORD:-maply}@db:5432/maply
-  DATA_DIR: /data
-  HOST_DATA_DIR: ${PWD:-.}/data
-  SCOPE_GEOJSON_PATH: /app/config/city_of_sydney_approx.geojson
-  # Inside the compose network the worker's browser reaches the mock site via the api service.
-  MOCK_PANORAMA_BASE_URL: http://api:8000
-  # Defence in depth: no third-party telemetry from any SDK or tool.
-  OPENAI_AGENTS_DISABLE_TRACING: "1"
-  DO_NOT_TRACK: "1"
-  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
 services:
   db:
@@ -26,7 +13,6 @@ services:
       - "127.0.0.1:${DB_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./scripts/db-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U maply -d maply"]
       interval: 3s
@@ -34,7 +20,7 @@ services:
       retries: 30
     restart: unless-stopped
 
-  api:
+  app:
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -43,9 +29,13 @@ services:
       - path: .env
         required: false
     environment:
-      <<: *app-env
-      APP_HOST: 0.0.0.0   # inside the container; the host port below is loopback-only
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.api.main:app --host 0.0.0.0 --port 8000"]
+      DATABASE_URL: postgresql+psycopg://maply:${POSTGRES_PASSWORD:-maply}@db:5432/maply
+      DATA_DIR: /data
+      # Prompts must contain paths Codex can use on your Mac, not container paths.
+      HOST_DATA_DIR: ${PWD:-.}/data
+      STREETS_FILE: /data/osm/city_of_sydney_streets.geojson
+      SCOPE_GEOJSON_PATH: /app/config/city_of_sydney_approx.geojson
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     volumes:
@@ -53,27 +43,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
-
-  worker:
-    image: maply-app:local
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      <<: *app-env
-      WORKER_HEADLESS: "true"
-    command: ["python", "-m", "app.workers.main"]
-    volumes:
-      - ./data:/data
-    depends_on:
-      db:
-        condition: service_healthy
-      api:
-        condition: service_started
-    # Chromium needs a larger /dev/shm than Docker's default 64MB.
-    shm_size: "1gb"
-    init: true
     restart: unless-stopped
 
 volumes:

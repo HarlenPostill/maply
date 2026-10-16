@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 
 const API = 'http://127.0.0.1:8000';
 
-// Local-only dashboard. Everything is bundled; no CDNs or external fonts.
+// Local app. Everything is bundled; no CDNs or external fonts.
 export default defineConfig({
   base: '/',
   plugins: [react()],
@@ -14,7 +14,6 @@ export default defineConfig({
     proxy: {
       '/api': { target: API, changeOrigin: false },
       '/files': { target: API, changeOrigin: false },
-      '/mock': { target: API, changeOrigin: false },
     },
   },
   preview: {
@@ -22,7 +21,6 @@ export default defineConfig({
     proxy: {
       '/api': { target: API, changeOrigin: false },
       '/files': { target: API, changeOrigin: false },
-      '/mock': { target: API, changeOrigin: false },
     },
   },
   build: {

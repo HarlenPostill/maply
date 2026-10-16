@@ -1,13 +1,14 @@
-import { StrictMode } from 'react';
+import React from 'react';
 import { createRoot } from 'react-dom/client';
-import './lib/map'; // Leaflet + Geoman + their CSS (bundled, no CDN)
+import '@fontsource/atkinson-hyperlegible/400.css';
+import '@fontsource/atkinson-hyperlegible/700.css';
+import 'leaflet/dist/leaflet.css';
+import '@geoman-io/leaflet-geoman-free/dist/leaflet-geoman.css';
 import './styles.css';
-import { App } from './App';
+import App from './App';
 
-const el = document.getElementById('root');
-if (!el) throw new Error('#root missing');
-createRoot(el).render(
-  <StrictMode>
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
     <App />
-  </StrictMode>,
+  </React.StrictMode>,
 );

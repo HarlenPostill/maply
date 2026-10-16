@@ -2,98 +2,108 @@
 
 # maply
 
-A local tool for **planning, supervising and inspecting** Street View image
-collection for an authorised wheelchair-accessibility research project in the
-City of Sydney. It covers collection and supervision only. Accessibility image
-analysis and routing are separate downstream components, and the dashboard shows
-**no accessibility scores**.
+Plan Google Street View photos of footpaths and kerbs in the City of Sydney,
+then hand the work to **Codex** in the ChatGPT app. Codex uses computer use in
+*your own browser* to take each photo, and maply checks the results.
 
-* **Plan:** draw a route or polygon (or import GeoJSON, or paste a Street View
-  URL), choose sides, interval and views, then review and edit a persistent capture plan.
-* **Collect:** a durable scheduler drives local Chromium workers (deterministic,
-  OpenAI computer-use, manual, or the official Static API) under geographic,
-  rate, capture, time and budget limits.
-* **Verify:** every capture is checked by the application (page state, frame
-  quality, position, orientation, imagery date, attribution, scope) before it is
-  accepted. An agent's claim of success is never enough.
-* **Inspect:** coverage (collection completeness vs verified coverage, gaps from
-  actual camera positions), a local gallery with full metadata and provenance,
-  accept / reject / recapture actions, and local dataset packaging.
+maply never browses, calls a model, or needs an API key. You stay in control
+of every hand-off.
 
-Everything is stored on this machine. Cloud image processing is **off by
-default** and blocked at the transport layer. See
-[docs/DATA_BOUNDARIES.md](docs/DATA_BOUNDARIES.md).
+## How it works
 
-## Quick start (Docker)
+1. **Block out an area** on the map (or draw individual streets). maply finds
+   the streets inside it from a local copy of OpenStreetMap.
+2. **Plan the photos.** Choose the spacing, which footpaths, and how many views
+   per point. Every photo appears on the map as a small cone showing where the
+   camera will look.
+3. **Copy a prompt into Codex.** Each prompt covers up to 20 photos (you can
+   change this). For every photo it gives:
+   * a Street View link in Google's documented format
+     (`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=LAT,LNG&heading=H&pitch=P&fov=F`)
+     that opens at the planned spot, already facing the planned direction;
+   * a plain description, e.g. *"west footpath of George Street, straight across; look W (277°)"*;
+   * the exact file to save, e.g. `images/P007-L1_-33.874278_151.205800_h277.png`.
 
-```bash
-cp .env.example .env              # optional: defaults are LOCAL ONLY + synthetic-ready
-docker compose up -d --build      # db + api + worker, all on 127.0.0.1
-open http://127.0.0.1:8000        # dashboard
-```
+   Codex opens each link, lines up the view, saves a screenshot under that name,
+   and logs the address-bar URL it ended on to `results/prompt-01.jsonl`.
+4. **Check photos.** maply matches each saved file to its planned shot and
+   reads the logged URL. Google rewrites that URL to the camera's real position
+   and heading, so maply can flag photos taken too far away, facing the wrong
+   way, or showing the other footpath. You can mark a photo *Looks right* or
+   *Needs a retake*, and copy a prompt that covers only the missing photos.
 
-To try it without touching any live service, create a project, draw a short
-route in the CBD, generate and approve a plan, and run a job with target
-**synthetic**. The worker drives local Chromium against the built-in **mock
-panorama site**. Every synthetic image is watermarked
-`SYNTHETIC MOCK PANORAMA … NOT Google Street View`.
-
-Persistent data lives in `./data` (images, thumbnails, previews, exports,
-browser profiles; bind-mounted, gitignored, excluded from image builds) and
-the `pgdata` volume (database).
-
-## Development (host)
+## Start
 
 ```bash
-docker compose up -d db                           # PostGIS on 127.0.0.1:5433
-cd backend
-uv sync && uv run playwright install chromium
-uv run alembic upgrade head
-uv run uvicorn app.api.main:app --host 127.0.0.1 --port 8000   # API + mock site (+ dashboard if built)
-uv run python -m app.workers.main                              # worker supervisor (WORKER_HEADLESS=false to watch)
-
-cd ../frontend && npm install && npm run dev      # http://127.0.0.1:5173 (proxies to :8000)
-npm run build                                     # dashboard served by the API at :8000
+docker compose up -d --build
+open http://127.0.0.1:8000
 ```
 
-## Tests
+The first time, download the City of Sydney street network so that "Block out
+an area" works offline (a minute or two; uses OpenStreetMap's Overpass service):
 
 ```bash
-cd backend && uv run pytest            # ~100 tests; needs the db service (uses database maply_test)
-docker compose run --rm api pytest     # same, inside the container
+cd backend && uv sync && uv run python ../scripts/fetch_streets.py
 ```
 
-| Area | Tests |
-|---|---|
-| Geometry & side conventions | `test_geometry.py`: metres vs degrees, true-north bearings, left/right relative to stored direction, reverse travel, stable segment IDs, crossings, approach labels, scope |
-| Leases & scheduler | `test_scheduler_leases.py`: concurrent claims, fencing tokens, expired-lease recovery, bounded retries/backoff, pause/cancel, shared rate limiter, permission limits |
-| Deduplication & crash recovery | `test_dedup_and_recovery.py`: stale completions rejected, partial unique index, tampered/missing artefacts, panorama reuse, dead-slot recovery, orphan files |
-| Cloud-image blocking | `test_egress.py`: detection, decision matrix, real OpenAI SDK through a mock transport, no retries of blocked requests, single construction point, no tracing deps, log redaction |
-| Verification | `test_verification.py`: URL parsing, explicit-date-only policy, blank/transition frames, offsets, scope, unknown-date policies |
-| End to end (real Chromium + supervisor) | `test_integration_workers.py`: synthetic job with faults, pause/resume + `kill -9` restart, CAPTCHA manual intervention, OpenAI agent loop vs a local fake provider (allowed and blocked), two workers |
-| API & guards | `test_api.py`, `test_static_api.py` |
+Without that file, maply asks the public Overpass servers each time, and they
+are often busy. "Draw streets" always works.
 
-Live Google/OpenAI checks are **not** part of the suite. See
-[docs/LIVE_INTEGRATION.md](docs/LIVE_INTEGRATION.md).
+### Codex setup
 
-## Documentation
+* Give Codex computer use, with access to **Google Chrome** (or set `BROWSER_APP`
+  in `.env`).
+* The prompt suggests `screencapture` to save just the browser window. macOS
+  asks once for **Screen Recording** permission for the app that runs it.
+* Paste one prompt per Codex task. When it finishes, press **Check photos**.
 
-* [docs/OPERATOR_GUIDE.md](docs/OPERATOR_GUIDE.md): day-to-day use
-* [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): design, geographic model, state machine
-* [docs/DATA_BOUNDARIES.md](docs/DATA_BOUNDARIES.md): what stays local, what can be transmitted
-* [docs/LIVE_INTEGRATION.md](docs/LIVE_INTEGRATION.md): remaining setup for Google and OpenAI, plus bounded live checks
+## Job folders
 
-## Limitations (current state)
+Everything for a job lives in one folder on your Mac:
 
-* **No live integration has been exercised.** The Google Maps page adapter and
-  the OpenAI adapter are implemented from documentation and tested only against
-  local stand-ins.
-* The shipped City of Sydney scope polygon is a **hand-digitised approximation**.
-  Replace it before live collection.
-* Intersection detection is heuristic (route endpoints, turns, crossings of
-  drawn routes). There is no road-network extraction.
-* Footpath offset lines are planning aids, not surveyed geometry. The
-  `geometry_consistent` association status does not mean the footpath is
-  visible. Only operator review (`operator_verified`) asserts that.
-* Frame checks (blank / uniform / unstable) are heuristics. Unusual imagery may
-  need review.
+```
+data/jobs/<job-name>/
+  job.json        the plan: every shot, its link, heading and file name
+  shots.csv       the same, for spreadsheets
+  prompts/        copies of each prompt you generated
+  images/         screenshots Codex saved (one per shot)
+  results/        Codex's logs, one JSON line per shot
+  thumbs/         small previews maply makes when checking
+  manifest.json   written on every check: plan + results, with relative paths
+```
+
+The folder is a complete, portable record for downstream analysis tools.
+Nothing is uploaded anywhere by maply. Codex's computer use does send
+screenshots of your screen to OpenAI as part of how it works; that happens in
+the ChatGPT app, under your account.
+
+## Conventions
+
+* Distances are in metres (computed in GDA2020 / MGA zone 56), and headings
+  are true-north compass bearings.
+* "Left/right of arrow" is relative to the direction each street is drawn.
+  Prompts describe footpaths by compass side (north, east, …) so Codex never
+  needs to know the drawing direction.
+* Camera positions are where Street View's camera stood, never the location of
+  a kerb or ramp in the photo.
+* Imagery dates come only from what Codex reads off the screen ("Image capture
+  Mar 2023"). Otherwise the date is recorded as unknown.
+
+## Development
+
+```bash
+docker compose up -d db
+cd backend && uv sync && uv run alembic upgrade head
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+cd ../frontend && npm install && npm run dev     # http://127.0.0.1:5173
+cd ../backend && uv run pytest                   # a few fast checks, under a second
+```
+
+## Limitations
+
+* The City of Sydney boundary in `config/` is a hand-drawn approximation.
+  Streets outside it are left out. Replace it with the official boundary if precision matters.
+* Divided roads appear in OpenStreetMap as two one-way lines, which plans
+  photos on both sides of each carriageway. Untick or redraw them if that's unwanted.
+* The checks rely on Codex logging the final address-bar URL. If it doesn't,
+  the photo is still matched by file name, but flagged as not lined-up-checked.
