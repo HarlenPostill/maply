@@ -18,6 +18,7 @@ export type DrawMode = 'area' | 'street' | null;
 
 type Props = {
   status: Status;
+  onViewChange?: (bbox: [number, number, number, number], zoom: number) => void;
   area: Geo | null;
   streets: FC | null;
   cones: Cone[];
@@ -52,7 +53,20 @@ function bearing(a: number[], b: number[]): number {
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
-export default function MapView({ status, area, streets, cones, drawMode, onDrawn, onConeClick, selectedId, fitKey }: Props) {
+// Explicit styles (not CSS classes) so the canvas renderer can draw thousands of shots quickly.
+const TONES: Record<Cone['tone'], L.PathOptions> = {
+  left: { color: '#2f6fa8', fillColor: '#2f6fa8', fillOpacity: 0.18 },
+  right: { color: '#a43f7e', fillColor: '#a43f7e', fillOpacity: 0.18 },
+  none: { color: '#22313a', fillColor: '#22313a', fillOpacity: 0.15 },
+  'done-left': { color: '#ffffff', fillColor: '#2f6fa8', fillOpacity: 0.85 },
+  'done-right': { color: '#ffffff', fillColor: '#a43f7e', fillOpacity: 0.85 },
+  'done-none': { color: '#ffffff', fillColor: '#22313a', fillOpacity: 0.8 },
+  accepted: { color: '#ffffff', fillColor: '#2c7a4b', fillOpacity: 0.85 },
+  attention: { color: '#22313a', fillColor: '#f2c230', fillOpacity: 0.95 },
+  muted: { color: '#8a9499', fillColor: '#8a9499', fillOpacity: 0.35, dashArray: '2 2' },
+};
+
+export default function MapView({ status, area, streets, cones, drawMode, onDrawn, onConeClick, selectedId, fitKey, onViewChange }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const layers = useRef<{ area: L.LayerGroup; streets: L.LayerGroup; cones: L.LayerGroup } | null>(null);
@@ -61,10 +75,12 @@ export default function MapView({ status, area, streets, cones, drawMode, onDraw
   const coneCb = useRef(onConeClick);
   coneCb.current = onConeClick;
   const [zoom, setZoom] = useState(16);
+  const viewCb = useRef(onViewChange);
+  viewCb.current = onViewChange;
 
   useEffect(() => {
     if (!el.current) return;
-    const m = L.map(el.current, { zoomControl: false, preferCanvas: false }).setView(SYDNEY, 16);
+    const m = L.map(el.current, { zoomControl: false, preferCanvas: true }).setView(SYDNEY, 16);
     L.control.zoom({ position: 'bottomright' }).addTo(m);
     if (status.basemap.url && status.basemap.url !== 'none') {
       L.tileLayer(status.basemap.url, { attribution: status.basemap.attribution, maxZoom: 20, maxNativeZoom: 19 }).addTo(m);
@@ -78,7 +94,13 @@ export default function MapView({ status, area, streets, cones, drawMode, onDraw
       m.removeLayer(e.layer);
       drawnCb.current?.(geometry, mode);
     });
-    m.on('zoomend', () => setZoom(m.getZoom()));
+    const report = () => {
+      setZoom(m.getZoom());
+      const b = m.getBounds();
+      viewCb.current?.([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], m.getZoom());
+    };
+    m.on('moveend', report);
+    setTimeout(report, 0);
     map.current = m;
     return () => {
       m.remove();
@@ -132,10 +154,10 @@ export default function MapView({ status, area, streets, cones, drawMode, onDraw
     const close = zoom >= 18;
     for (const c of cones) {
       const sel = c.id === selectedId;
-      const cls = `cone cone-${c.tone}${sel ? ' cone-selected' : ''}`;
+      const style: L.PathOptions = { ...TONES[c.tone], ...(sel ? { color: '#22313a', weight: 2.5 } : {}) };
       const shape = close
-        ? L.polygon(conePoints(c, 9), { className: cls, weight: sel ? 2.5 : 1.25 })
-        : L.circleMarker(offset(c.lat, c.lng, c.heading, 3), { className: cls, radius: sel ? 5 : 2.5, weight: sel ? 2 : 1 });
+        ? L.polygon(conePoints(c, 9), { ...style, weight: style.weight ?? 1.25 })
+        : L.circleMarker(offset(c.lat, c.lng, c.heading, 3), { ...style, radius: sel ? 5 : 2.5, weight: style.weight ?? 1 });
       shape.bindTooltip(c.label, { direction: 'top', sticky: true, className: 'cone-tip' });
       shape.on('click', () => coneCb.current?.(c.id));
       shape.addTo(g);

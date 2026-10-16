@@ -128,18 +128,7 @@ input:focus { border-color: var(--ink); outline: none; }
 /* ---------- map ---------- */
 .leaflet-container { font-family: inherit; }
 .leaflet-tile-pane { filter: grayscale(0.9) contrast(0.92) brightness(1.04); }
-.cone { stroke: var(--paper); }
-.cone-left { fill: var(--left); fill-opacity: 0.18; stroke: var(--left); }
-.cone-right { fill: var(--right); fill-opacity: 0.18; stroke: var(--right); }
-.cone-none { fill: var(--ink); fill-opacity: 0.15; stroke: var(--ink); }
-.cone-done-left { fill: var(--left); fill-opacity: 0.85; stroke: var(--paper); }
-.cone-done-right { fill: var(--right); fill-opacity: 0.85; stroke: var(--paper); }
-.cone-done-none { fill: var(--ink); fill-opacity: 0.8; stroke: var(--paper); }
-.cone-accepted { fill: var(--ok); fill-opacity: 0.85; stroke: var(--paper); }
-.cone-attention { fill: var(--tactile); fill-opacity: 0.95; stroke: var(--ink); }
-.cone-muted { fill: #8a9499; fill-opacity: 0.35; stroke: #8a9499; stroke-dasharray: 2 2; }
-.cone-selected { stroke: var(--ink); stroke-width: 2.5; }
-.cone-tip { font-family: inherit; font-size: var(--t-s); border-radius: 6px; }
+
 .dir-mark span { display: block; width: 14px; height: 14px; }
 .dir-mark span::before { content: ''; display: block; margin: 1px auto 0; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid var(--ink); opacity: 0.7; }
 .leaflet-bar a { color: var(--ink); }
@@ -188,3 +177,11 @@ input:focus { border-color: var(--ink); outline: none; }
 @media (prefers-reduced-motion: reduce) {
   .meter > span { transition: none; }
 }
+
+/* ---------- big jobs and capture ---------- */
+.stage-hint { position: absolute; top: 1rem; left: 50%; transform: translateX(-50%); z-index: 500; margin: 0; padding: 0.4rem 0.8rem; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; font-size: var(--t-s); }
+.more-btn { display: block; margin: 1.5rem auto 0; }
+.keys-inline { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.4rem 0.9rem; font-size: var(--t-s); color: var(--muted); }
+.keys-inline kbd { font: inherit; font-weight: 700; color: var(--ink); background: var(--concrete); border: 1px solid var(--line); border-radius: 5px; padding: 0.05rem 0.4rem; margin-right: 0.2rem; }
+.summary p + p { margin-top: 0.4rem; }
+.seg > button:disabled { opacity: 0.45; cursor: default; }

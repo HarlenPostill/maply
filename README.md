@@ -2,35 +2,13 @@
 
 # maply
 
-Plan Google Street View photos of footpaths and kerbs in the City of Sydney,
-then hand the work to **Codex** in the ChatGPT app. Codex uses computer use in
-*your own browser* to take each photo, and maply checks the results.
+Plan Google Street View photos of every footpath in the City of Sydney, then
+capture them quickly yourself with a Chrome extension. Each photo is saved with
+the metadata an image model will need later: street, OSM tags, footpath side,
+planned and actual camera position and heading, distance to the nearest
+intersection, and imagery date.
 
-maply never browses, calls a model, or needs an API key. You stay in control
-of every hand-off.
-
-## How it works
-
-1. **Block out an area** on the map (or draw individual streets). maply finds
-   the streets inside it from a local copy of OpenStreetMap.
-2. **Plan the photos.** Choose the spacing, which footpaths, and how many views
-   per point. Every photo appears on the map as a small cone showing where the
-   camera will look.
-3. **Copy a prompt into Codex.** Each prompt covers up to 20 photos (you can
-   change this). For every photo it gives:
-   * a Street View link in Google's documented format
-     (`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=LAT,LNG&heading=H&pitch=P&fov=F`)
-     that opens at the planned spot, already facing the planned direction;
-   * a plain description, e.g. *"west footpath of George Street, straight across; look W (277°)"*;
-   * the exact file to save, e.g. `images/P007-L1_-33.874278_151.205800_h277.png`.
-
-   Codex opens each link, lines up the view, saves a screenshot under that name,
-   and logs the address-bar URL it ended on to `results/prompt-01.jsonl`.
-4. **Check photos.** maply matches each saved file to its planned shot and
-   reads the logged URL. Google rewrites that URL to the camera's real position
-   and heading, so maply can flag photos taken too far away, facing the wrong
-   way, or showing the other footpath. You can mark a photo *Looks right* or
-   *Needs a retake*, and copy a prompt that covers only the missing photos.
+maply runs locally. It needs no API keys and uploads nothing.
 
 ## Start
 
@@ -39,55 +17,113 @@ docker compose up -d --build
 open http://127.0.0.1:8000
 ```
 
-The first time, download the City of Sydney street network so that "Block out
-an area" works offline (a minute or two; uses OpenStreetMap's Overpass service):
+Once, download the City of Sydney street network from OpenStreetMap (a minute
+or two). "Block out an area" and "Whole city" then work offline:
 
 ```bash
 cd backend && uv sync && uv run python ../scripts/fetch_streets.py
 ```
 
-Without that file, maply asks the public Overpass servers each time, and they
-are often busy. "Draw streets" always works.
+## 1. Plan a job
 
-### Codex setup
+**New job**, then choose how to pick streets:
 
-* Give Codex computer use, with access to **Google Chrome** (or set `BROWSER_APP`
-  in `.env`).
-* The prompt suggests `screencapture` to save just the browser window. macOS
-  asks once for **Screen Recording** permission for the app that runs it.
-* Paste one prompt per Codex task. When it finishes, press **Check photos**.
+* **Block out an area:** outline a few blocks on the map.
+* **Draw streets:** click along individual streets.
+* **Whole city:** every street inside the City of Sydney boundary. At 15 m spacing
+  that's about 62,700 photos along 436 km of streets. Ticking *Also photograph into
+  each intersection* adds corner views for kerb ramps (about 102,000 photos).
 
-## Job folders
+Then set the spacing, which footpaths, and the views per point. Each shot gets a
+Street View link in Google's documented format
+(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=LAT,LNG&heading=H&pitch=P&fov=F`)
+that opens at the planned spot, already facing the planned direction.
+
+## 2. Capture with the Chrome extension
+
+Install it once:
+
+1. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**
+   and choose the `extension/` folder in this repository.
+2. Pin **maply capture**. Click it, choose your job and press **Start capturing**.
+
+Then work through the shots in that tab:
+
+| Key | What it does |
+|---|---|
+| **Enter** | Save the view exactly as you've lined it up, and open the next shot |
+| **N** | No imagery here |
+| **B** | Footpath blocked from view |
+| **X** | Skip for now (skipped shots come back if you tick *Include shots I skipped*) |
+| **[** | Back to the previous shot |
+| **H** | Hide or show the panel |
+
+The panel at the bottom of the page shows the shot, which footpath to aim at,
+and live feedback as you drag: *On target* or *Turn left 12°*, plus the
+camera's distance from the plan. It hides itself while saving, so it's never in
+the photo.
+
+Progress is stored in maply, so you can stop at any time and press Start later
+to carry on from the next unfinished shot. The same actions also work from
+anywhere in Chrome with Alt+Shift+S / N / K / B (change these at
+`chrome://extensions/shortcuts`).
+
+**Why the extension asks for access to all sites:** Chrome only lets an extension
+capture a tab from a key press if it has that permission. The extension only
+runs on `google.com/maps` pages, and it only sends captures to your local maply
+at `127.0.0.1`.
+
+Prefer to hand batches to Codex? Each job also has **Hand photos to Codex
+instead**: copyable prompts plus a *Check photos* step.
+
+## 3. Use the dataset
 
 Everything for a job lives in one folder on your Mac:
 
 ```
-data/jobs/<job-name>/
-  job.json        the plan: every shot, its link, heading and file name
-  shots.csv       the same, for spreadsheets
-  prompts/        copies of each prompt you generated
-  images/         screenshots Codex saved (one per shot)
-  results/        Codex's logs, one JSON line per shot
-  thumbs/         small previews maply makes when checking
-  manifest.json   written on every check: plan + results, with relative paths
+data/jobs/<job>/
+  images/<street>/<shot>_<lat>_<lng>_h<heading>.jpg   the photos
+  thumbs/<street>/...                                  480 px previews
+  shots.csv                                            every planned shot
+  dataset/manifest.jsonl                               written by "Write dataset file"
+  dataset/schema.json                                  field descriptions + suggested labels
 ```
 
-The folder is a complete, portable record for downstream analysis tools.
-Nothing is uploaded anywhere by maply. Codex's computer use does send
-screenshots of your screen to OpenAI as part of how it works; that happens in
-the ChatGPT app, under your account.
+`manifest.jsonl` has one line per photo:
+
+```json
+{"id": "city-of-sydney/P04211-L1", "image": "images/george-street/P04211-L1_….jpg",
+ "street": {"name": "George Street", "highway": "primary", "osm_way_ids": [...], "osm_tags": {"sidewalk": "both", "surface": "asphalt"}},
+ "footpath": {"side": "west", "relative_side": "left"},
+ "view": {"kind": "street", "type": "perpendicular", "description": "straight across"},
+ "planned": {"lat": …, "lng": …, "heading": 277.5, "pitch": -8, "fov": 80, "url": "…"},
+ "camera": {"lat": …, "lng": …, "heading": 281.0, "pano_id": "…", "offset_from_plan_m": 1.1},
+ "near_intersection_m": 42.0, "imagery_date": {"value": "2024-03"},
+ "quality": {"status": "captured", "flags": []}, "labels": null}
+```
+
+`labels` is reserved for phase 2, when an image model adds accessibility tags.
+`schema.json` suggests fields: footpath present, condition, kerb type, kerb
+ramp, tactile indicators, obstructions, surface. The database has a matching
+`labels` column ready.
+
+**Disk space:** photos are JPEGs of your browser window. At the extension's
+default quality, expect roughly 0.3–1 MB each, so 20–60 GB for the whole city.
+The job page shows space used so far and an estimate for the finished job.
+Lower *JPEG quality* in the extension's settings if you need smaller files.
 
 ## Conventions
 
 * Distances are in metres (computed in GDA2020 / MGA zone 56), and headings
   are true-north compass bearings.
-* "Left/right of arrow" is relative to the direction each street is drawn.
-  Prompts describe footpaths by compass side (north, east, …) so Codex never
-  needs to know the drawing direction.
+* "Left/right of arrow" is relative to each street's drawn direction. The
+  dataset also gives the compass side (north, east, …).
 * Camera positions are where Street View's camera stood, never the location of
   a kerb or ramp in the photo.
-* Imagery dates come only from what Codex reads off the screen ("Image capture
-  Mar 2023"). Otherwise the date is recorded as unknown.
+* Imagery dates come only from the "Image capture" text Street View shows. If
+  it isn't shown, the date is recorded as unknown.
+* Shots are ordered street by street through neighbourhoods, so a session moves
+  smoothly from block to block.
 
 ## Development
 
@@ -96,14 +132,18 @@ docker compose up -d db
 cd backend && uv sync && uv run alembic upgrade head
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 cd ../frontend && npm install && npm run dev     # http://127.0.0.1:5173
-cd ../backend && uv run pytest                   # a few fast checks, under a second
+cd ../backend && uv run pytest                   # quick checks, about a second
 ```
+
+After changing the extension, click its reload icon on `chrome://extensions`.
 
 ## Limitations
 
 * The City of Sydney boundary in `config/` is a hand-drawn approximation.
-  Streets outside it are left out. Replace it with the official boundary if precision matters.
-* Divided roads appear in OpenStreetMap as two one-way lines, which plans
-  photos on both sides of each carriageway. Untick or redraw them if that's unwanted.
-* The checks rely on Codex logging the final address-bar URL. If it doesn't,
-  the photo is still matched by file name, but flagged as not lined-up-checked.
+* Divided roads appear in OpenStreetMap as two one-way lines, so both sides of
+  each carriageway get photos. Untick or redraw them in small jobs if that's unwanted.
+* Photos include Google's on-screen controls around the edges. Crop fixed
+  margins before analysis if they get in the way.
+* The extension reads the camera position and imagery date from Google's page
+  (address bar and visible text). If Google changes its page, values that
+  can't be read are recorded as unknown and the photo is flagged.

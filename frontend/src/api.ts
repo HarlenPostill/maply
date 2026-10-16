@@ -20,14 +20,16 @@ export type Status = {
   browser: string;
   basemap: { url: string; attribution: string };
   scope: Geo;
+  local_streets: boolean;
 };
 
 export type PlannedShot = { code: string; lat: number; lng: number; heading: number; fov: number; side: string; kind: string; street: string; look: string; url: string };
 
 export type Preview = {
-  summary: { shots: number; points: number; streets: number; length_m: number; batches: number };
+  summary: { shots: number; points: number; streets: number; length_m: number; batches: number; intersections: number };
   warnings: string[];
   shots: PlannedShot[];
+  shots_omitted: boolean;
 };
 
 export type Counts = Record<string, number> & { total: number; done: number };
@@ -43,6 +45,7 @@ export type JobSummary = {
   counts: Counts;
   folder: string;
   batches: number;
+  storage: { saved_bytes: number; estimated_total_bytes: number | null };
 };
 
 export type Shot = PlannedShot & {
@@ -52,6 +55,10 @@ export type Shot = PlannedShot & {
   view_kind: string;
   pitch: number;
   filename: string;
+  footpath: string;
+  near_node_m: number | null;
+  captured_at: string | null;
+  capture_source: string | null;
   status: string;
   flags: string[];
   note: string;
@@ -60,7 +67,9 @@ export type Shot = PlannedShot & {
   thumb_url: string | null;
 };
 
-export type Job = JobSummary & { area: Geo | null; streets: FC; segments: any[]; shots: Shot[]; warnings?: string[]; unknown_log_entries?: string[] };
+export type Job = JobSummary & { area: Geo | null; streets: FC | null; street_count: number; bounds: [number, number, number, number] | null; warnings?: string[]; unknown_log_entries?: string[]; changed?: number };
+
+export type ShotPage = { total: number; items: Shot[] };
 
 export type Prompt = { text: string; shots: string[]; label: string; log_file: string; batches: number };
 

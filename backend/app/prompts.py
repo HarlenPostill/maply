@@ -15,7 +15,7 @@ def screenshot_command(browser: str, path: str) -> str:
     return (
         f"b=$(osascript -e 'tell application \"{browser}\" to get bounds of front window'); "
         'IFS=", " read -r x1 y1 x2 y2 <<< "$b"; '
-        f'screencapture -x -R"$x1,$y1,$((x2-x1)),$((y2-y1))" "{path}"'
+        f'screencapture -x -t jpg -R"$x1,$y1,$((x2-x1)),$((y2-y1))" "{path}"'
     )
 
 
@@ -44,7 +44,7 @@ For each shot:
 3. If Google shows a map, a "no imagery" message, an indoor photo or a user-uploaded photo sphere instead of street imagery, log the shot as no_imagery and move on.
 4. Line up the shot. You should be looking at what the shot describes, facing its compass heading (within about 15°), with the kerb and footpath clearly in frame. Drag the view sideways to centre the footpath if needed, but don't zoom. If a vehicle or object completely hides the footpath, you may click once along the street to the nearest clear spot within about 10 m and face the same heading again. If the footpath still can't be seen, log the shot as blocked.
 5. Close anything covering the picture (the side panel, popups, banners) without accepting anything or changing settings. Never sign in or solve a CAPTCHA. If one appears, stop and tell me.
-6. Save a screenshot of the {browser} window to the exact "save as" path inside the job folder, as a PNG. On macOS this command captures just the browser window (shown for the first shot; use each shot's own path):
+6. Save a screenshot of the {browser} window to the exact "save as" path inside the job folder, as a JPEG (create the street folder if it doesn't exist). On macOS this command captures just the browser window (shown for the first shot; use each shot's own path):
    {screenshot_command(browser, example_path)}
 7. Add one line to results/{log_name} (create the file if needed). Each line is one JSON object:
    {{"shot": "P001-L1", "status": "captured", "file": "images/<save as>", "final_url": "<address bar URL after lining up>", "image_date": "<e.g. Mar 2023, or empty>", "notes": ""}}

@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,14 +45,19 @@ class Segment(Base):
     geom = mapped_column(Geometry("LINESTRING", srid=4326, spatial_index=False), nullable=False)
     bearing_deg: Mapped[float] = mapped_column(Float, nullable=False)  # stored direction, true north
     length_m: Mapped[float] = mapped_column(Float, nullable=False)
+    osm: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)  # highway class, way ids, sidewalk/kerb/surface tags
 
 
-SHOT_STATUSES = ("pending", "captured", "needs_check", "no_imagery", "blocked", "accepted", "retake")
+SHOT_STATUSES = ("pending", "captured", "needs_check", "no_imagery", "blocked", "skipped", "accepted", "retake")
 
 
 class Shot(Base):
     __tablename__ = "shots"
-    __table_args__ = (UniqueConstraint("job_id", "code"),)
+    __table_args__ = (
+        UniqueConstraint("job_id", "code"),
+        Index("ix_shots_job_status_ordinal", "job_id", "status", "ordinal"),
+        Index("ix_shots_job_ordinal", "job_id", "ordinal"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
@@ -72,8 +77,13 @@ class Shot(Base):
     pitch: Mapped[float] = mapped_column(Float, nullable=False)
     fov: Mapped[float] = mapped_column(Float, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
-    filename: Mapped[str] = mapped_column(String(160), nullable=False)
-    # After checking results.
+    filename: Mapped[str] = mapped_column(String(200), nullable=False)  # relative to the job's images/ folder
+    footpath: Mapped[str] = mapped_column(String(20), default="", nullable=False)  # compass side, e.g. "west"
+    near_node_m: Mapped[float | None] = mapped_column(Float)  # distance to the nearest intersection/corner
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    capture_source: Mapped[str | None] = mapped_column(String(20))  # extension | codex
+    labels: Mapped[dict | None] = mapped_column(JSONB)  # reserved for phase 2 (accessibility tags from image analysis)
+    # After capture / checking results.
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     flags: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=False)
     result: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)

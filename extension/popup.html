@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <h1>maply capture</h1>
+    <p id="status" class="muted">Connecting to maply…</p>
+
+    <label class="field" for="job">Job</label>
+    <select id="job"></select>
+    <p id="progress" class="muted"></p>
+
+    <button id="start" class="primary" type="button">Start capturing</button>
+    <button id="stop" type="button" hidden>Pause</button>
+
+    <details>
+      <summary>Settings</summary>
+      <label class="field" for="server">maply address</label>
+      <input id="server" type="url" />
+      <label class="field" for="quality">JPEG quality</label>
+      <input id="quality" type="number" min="60" max="100" />
+      <label class="check"><input id="skipped" type="checkbox" /> Include shots I skipped</label>
+    </details>
+
+    <section class="keys">
+      <h2>On the Street View page</h2>
+      <dl>
+        <dt>Enter</dt><dd>Save the view and open the next shot</dd>
+        <dt>N</dt><dd>No imagery here</dd>
+        <dt>B</dt><dd>Footpath blocked from view</dd>
+        <dt>X</dt><dd>Skip for now</dd>
+        <dt>[</dt><dd>Back to the previous shot</dd>
+        <dt>H</dt><dd>Hide or show the panel</dd>
+      </dl>
+      <p class="muted">Anywhere in Chrome: Alt+Shift+S saves, Alt+Shift+N no imagery, Alt+Shift+K skip, Alt+Shift+B back. <a href="#" id="shortcuts">Change shortcuts</a></p>
+    </section>
+    <script src="popup.js"></script>
+  </body>
+</html>

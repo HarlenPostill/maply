@@ -47,21 +47,38 @@ def fetch_overpass(query: str, timeout: float = 30) -> list[dict]:
     raise StreetLookupError("OpenStreetMap’s street servers are busy (" + "; ".join(errors) + "). Try again in a minute, or draw the streets yourself.")
 
 
-def ways_to_lines(elements: list[dict]) -> list[tuple[LineString, str, str]]:
+# OSM tags kept with each street: useful context for later accessibility analysis.
+KEEP_TAGS = (
+    "highway", "name", "sidewalk", "sidewalk:left", "sidewalk:right", "sidewalk:both", "footway",
+    "kerb", "surface", "oneway", "lanes", "maxspeed", "lit", "width", "bus", "cycleway",
+)
+
+
+def ways_to_lines(elements: list[dict]) -> list[tuple[LineString, str, str, dict]]:
+    """(line, name, highway, osm) for each way; osm = {"way_id": .., "tags": {...}}."""
     out = []
     for el in elements:
         geom = el.get("geometry") or []
         if len(geom) >= 2:
             tags = el.get("tags") or {}
-            out.append((LineString([(p["lon"], p["lat"]) for p in geom]), tags.get("name") or "Unnamed street", tags.get("highway", "")))
+            osm = {"way_id": el.get("id"), "tags": {k: v for k, v in tags.items() if k in KEEP_TAGS}}
+            out.append((LineString([(p["lon"], p["lat"]) for p in geom]), tags.get("name") or "Unnamed street", tags.get("highway", ""), osm))
     return out
 
 
 @lru_cache(maxsize=1)
 def _local_index(path: str, mtime: float):
     gj = json.loads(open(path).read())
-    lines = [(shape(f["geometry"]), f["properties"].get("name") or "Unnamed street", f["properties"].get("highway", "")) for f in gj["features"]]
-    return lines, STRtree([g for g, _, _ in lines])
+    lines = [
+        (shape(f["geometry"]), f["properties"].get("name") or "Unnamed street", f["properties"].get("highway", ""),
+         {"way_id": f["properties"].get("way_id"), "tags": f["properties"].get("tags", {})})
+        for f in gj["features"]
+    ]
+    return lines, STRtree([x[0] for x in lines])
+
+
+def local_streets_available() -> bool:
+    return get_settings().streets_file.resolve().is_file()
 
 
 def find_streets(area_geojson: dict, highways: tuple[str, ...] = HIGHWAYS) -> dict:
@@ -84,20 +101,62 @@ def find_streets(area_geojson: dict, highways: tuple[str, ...] = HIGHWAYS) -> di
         candidates = ways_to_lines(fetch_overpass(overpass_query(poly, highways)))
         source = "OpenStreetMap Overpass"
 
+    return {"type": "FeatureCollection", "features": streets_from_candidates(candidates, area, highways), "source": source, "attribution": "Street data © OpenStreetMap contributors (ODbL)"}
+
+
+def streets_from_candidates(candidates, area, highways=HIGHWAYS) -> list[dict]:
+    """Clip ways to the area and merge the pieces of each street, keeping OSM ids and tags."""
     by_name: dict[str, list[LineString]] = {}
-    kinds: dict[str, str] = {}
-    for line, name, kind in candidates:
+    meta: dict[str, dict] = {}
+    for line, name, kind, osm in candidates:
         if kind not in highways:
             continue
-        clipped = line.intersection(area)
-        by_name.setdefault(name, []).extend(p for p in getattr(clipped, "geoms", [clipped]) if isinstance(p, LineString) and p.length > 0)
-        kinds[name] = kind
+        clipped = line.intersection(area) if area is not None else line
+        pieces = [p for p in getattr(clipped, "geoms", [clipped]) if isinstance(p, LineString) and p.length > 0]
+        if not pieces:
+            continue
+        by_name.setdefault(name, []).extend(pieces)
+        m = meta.setdefault(name, {"highway": kind, "way_ids": [], "tags": {}})
+        if osm.get("way_id") is not None:
+            m["way_ids"].append(osm["way_id"])
+        for k, v in (osm.get("tags") or {}).items():
+            m["tags"].setdefault(k, v)  # first value wins; per-way detail stays in the street file
     features = []
     for name, parts in sorted(by_name.items()):
-        if not parts:
-            continue
         merged = linemerge(MultiLineString(parts)) if len(parts) > 1 else parts[0]
         for part in getattr(merged, "geoms", [merged]):
             if to_projected(part).length >= 15:  # ignore stubs
-                features.append({"type": "Feature", "properties": {"name": name, "highway": kinds.get(name, "")}, "geometry": mapping(part)})
-    return {"type": "FeatureCollection", "features": features, "source": source, "attribution": "Street data © OpenStreetMap contributors (ODbL)"}
+                m = meta[name]
+                features.append({"type": "Feature", "properties": {"name": name, "highway": m["highway"], "osm_way_ids": sorted(set(m["way_ids"])), "osm_tags": m["tags"]}, "geometry": mapping(part)})
+    return features
+
+
+def whole_scope_streets(scope) -> dict:
+    """Every street in the approved boundary, from the local street file (required: too big for Overpass per click)."""
+    local = get_settings().streets_file.resolve()
+    if not local.is_file():
+        raise StreetLookupError("The local street file is missing. Run scripts/fetch_streets.py once, then try again.")
+    lines, tree = _local_index(str(local), local.stat().st_mtime)
+    candidates = [lines[i] for i in tree.query(scope)]
+    features = streets_from_candidates(candidates, scope)
+    # Order streets so neighbouring streets are photographed one after another
+    # (Hilbert curve over street midpoints), instead of alphabetically.
+    w, s_, e, n = scope.bounds
+    features.sort(key=lambda f: _hilbert(shape(f["geometry"]).interpolate(0.5, normalized=True), w, s_, e, n))
+    return {"type": "FeatureCollection", "features": features, "source": "local street file", "attribution": "Street data © OpenStreetMap contributors (ODbL)"}
+
+
+def _hilbert(pt, w, s, e, n, order: int = 10) -> int:
+    size = 1 << order
+    x = min(size - 1, max(0, int((pt.x - w) / (e - w) * size)))
+    y = min(size - 1, max(0, int((pt.y - s) / (n - s) * size)))
+    d, sq = 0, size // 2
+    while sq > 0:
+        rx, ry = int(x & sq > 0), int(y & sq > 0)
+        d += sq * sq * ((3 * rx) ^ ry)
+        if ry == 0:
+            if rx == 1:
+                x, y = sq - 1 - x, sq - 1 - y
+            x, y = y, x
+        sq //= 2
+    return d

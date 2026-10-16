@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "maply capture",
+  "version": "0.1.0",
+  "description": "Step through a maply job's Street View links. Line up each view, press Enter to save it and open the next.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "maply capture",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.google.com/maps/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "save-and-next": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Save this view and open the next shot"
+    },
+    "no-imagery": {
+      "suggested_key": {
+        "default": "Alt+Shift+N"
+      },
+      "description": "No imagery here: open the next shot"
+    },
+    "skip": {
+      "suggested_key": {
+        "default": "Alt+Shift+K"
+      },
+      "description": "Skip this shot for now"
+    },
+    "back": {
+      "suggested_key": {
+        "default": "Alt+Shift+B"
+      },
+      "description": "Go back to the previous shot"
+    }
+  }
+}

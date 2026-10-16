@@ -1,0 +1,43 @@
+/* maply capture panel. Self-contained; uses the app's palette. */
+.maply-hud {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  width: min(680px, calc(100vw - 32px));
+  padding: 12px 14px;
+  background: #ffffff;
+  color: #22313a;
+  border: 1px solid #dce1de;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(34, 49, 58, 0.18);
+  font: 14px/1.4 'Atkinson Hyperlegible', system-ui, -apple-system, sans-serif;
+}
+.maply-hud[hidden] { display: none; }
+.maply-hud p { margin: 6px 0 0; }
+.maply-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.maply-code { font-weight: 700; font-size: 15px; }
+.maply-progress { color: #5f6b70; font-size: 13px; }
+.maply-look { font-weight: 700; font-size: 16px; }
+.maply-live { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.maply-pill { font-size: 13px; padding: 3px 9px; border-radius: 999px; background: #f1f3f1; }
+.maply-ok { background: #e3f1e8; color: #2c7a4b; }
+.maply-warn { background: #fdf4d6; color: #4a3b00; }
+.maply-last { font-size: 13px; color: #2c7a4b; }
+.maply-last.maply-warn { background: none; color: #9a6a00; }
+.maply-keys { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.maply-btn {
+  border: 1px solid #dce1de;
+  background: #ffffff;
+  color: #22313a;
+  border-radius: 8px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.maply-btn:first-child { background: #f2c230; border-color: #f2c230; font-weight: 700; }
+.maply-btn kbd { font: inherit; font-weight: 700; }
+.maply-quiet { margin-left: auto; border-color: transparent; text-decoration: underline; text-underline-offset: 3px; color: #5f6b70; }
+.maply-btn:focus-visible { outline: 3px solid #f2c230; outline-offset: 2px; }

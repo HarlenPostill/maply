@@ -11,6 +11,7 @@ export type MapState = {
   drawMode: DrawMode;
   onDrawn?: (g: Geo, mode: 'area' | 'street') => void;
   onConeClick?: (id: string) => void;
+  onViewChange?: (bbox: [number, number, number, number], zoom: number) => void;
   selectedId?: string | null;
   fitKey?: string;
 };
@@ -50,7 +51,7 @@ export default function App() {
       <aside className="panel">
         <header className="brand">
           <button type="button" className="wordmark" onClick={() => { setView({ kind: 'home' }); loadJobs(); }}>maply</button>
-          <span className="brand-note">Street View photo jobs for Codex</span>
+          <span className="brand-note">Street View photo jobs</span>
         </header>
 
         {view.kind === 'home' && (

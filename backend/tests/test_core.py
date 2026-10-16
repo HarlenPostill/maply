@@ -33,7 +33,8 @@ def test_shots_have_correct_sides_links_and_files():
     assert right.heading == pytest.approx(97.5, abs=1) and "east footpath" in right.look
     p = parse_streetview_url(left.url)
     assert p.url_form == "maps_urls_api" and p.heading == pytest.approx(left.heading, abs=0.1) and p.lat == pytest.approx(left.lat, abs=1e-6)
-    assert left.filename.startswith(f"{left.code}_{left.lat:.6f}_{left.lng:.6f}_h")
+    assert left.filename.startswith(f"george-street/{left.code}_{left.lat:.6f}_{left.lng:.6f}_h") and left.filename.endswith(".jpg")
+    assert left.footpath == "west" and right.footpath == "east"
     pts = sorted({(s.lng, s.lat) for s in shots}, key=lambda t: t[1])
     assert geodesic_distance(*pts[0], *pts[1]) == pytest.approx(30, abs=0.5)  # spacing is metres
 
@@ -63,7 +64,7 @@ def _png(path: Path, w=1280, h=800):
 
 
 def _shot(**kw):
-    base = dict(code="P001-L1", filename="P001-L1_-33.875010_151.206680_h277.png", lat=-33.87501, lng=151.20668, heading=277.5, side="left", status="pending", result={})
+    base = dict(code="P001-L1", filename="george-street/P001-L1_-33.875010_151.206680_h277.jpg", lat=-33.87501, lng=151.20668, heading=277.5, side="left", status="pending", result={}, flags=[])
     base.update(kw)
     return SimpleNamespace(**base)
 

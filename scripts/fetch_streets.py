@@ -27,8 +27,8 @@ def main() -> int:
     print("Downloading streets for the City of Sydney from OpenStreetMap (this can take a minute)…")
     lines = ways_to_lines(fetch_overpass(overpass_query(f"{so},{w},{n},{e}", timeout=120), timeout=180))
     feats = [
-        {"type": "Feature", "properties": {"name": name, "highway": kind}, "geometry": mapping(line)}
-        for line, name, kind in lines
+        {"type": "Feature", "properties": {"name": name, "highway": kind, "way_id": osm["way_id"], "tags": osm["tags"]}, "geometry": mapping(line)}
+        for line, name, kind, osm in lines
         if line.intersects(scope)
     ]
     out = s.streets_file.resolve()

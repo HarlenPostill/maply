@@ -19,8 +19,8 @@ function lineLength(f: Feature): number {
   return m;
 }
 
-export default function NewJob({ setMap, onCancel, onCreated }: Props) {
-  const [source, setSource] = useState<'area' | 'street'>('area');
+export default function NewJob({ status, setMap, onCancel, onCreated }: Props) {
+  const [source, setSource] = useState<'area' | 'street' | 'city'>('area');
   const [drawing, setDrawing] = useState<DrawMode>('area');
   const [area, setArea] = useState<Geo | null>(null);
   const [streets, setStreets] = useState<FC | null>(null);
@@ -66,19 +66,20 @@ export default function NewJob({ setMap, onCancel, onCreated }: Props) {
 
   // live preview of every planned photo
   useEffect(() => {
-    if (!included || included.features.length === 0) {
+    const city = source === 'city';
+    if (!city && (!included || included.features.length === 0)) {
       setPreview(null);
       return;
     }
     const my = ++seq.current;
     const t = setTimeout(() => {
       api
-        .post<Preview>('/api/preview', { streets: included, options: opts })
+        .post<Preview>('/api/preview', city ? { whole_city: true, options: opts } : { streets: included, options: opts })
         .then((p) => my === seq.current && setPreview(p))
         .catch((e) => my === seq.current && setError(e.message));
     }, 300);
     return () => clearTimeout(t);
-  }, [included, opts]);
+  }, [included, opts, source]);
 
   const cones: Cone[] = useMemo(
     () => (preview?.shots ?? []).map((s) => ({ id: s.code, lat: s.lat, lng: s.lng, heading: s.heading, fov: s.fov, tone: (s.side === 'left' ? 'left' : s.side === 'right' ? 'right' : 'none') as Cone['tone'], label: `${s.code}: ${s.look}` })),
@@ -104,21 +105,23 @@ export default function NewJob({ setMap, onCancel, onCreated }: Props) {
     setStreets((s) => s && { ...s, features: s.features.map((f) => ((f.properties.name || 'Unnamed street') === n ? { ...f, properties: { ...f.properties, include } } : f)) });
   }
 
-  function chooseSource(s: 'area' | 'street') {
+  function chooseSource(s: 'area' | 'street' | 'city') {
     setSource(s);
-    setArea(null);
     setStreets(null);
     setPreview(null);
     setError('');
-    setDrawing(s);
+    setArea(s === 'city' ? status.scope : null);
+    setDrawing(s === 'city' ? null : s);
+    if (s === 'city') setFitKey(`city-${Date.now()}`);
   }
 
   async function create() {
-    if (!included) return;
+    if (source !== 'city' && !included) return;
     setCreating(true);
     setError('');
     try {
-      const job = await api.post<Job>('/api/jobs', { name: name.trim() || defaultName, area, streets: included, options: opts });
+      const body = source === 'city' ? { name: name.trim() || defaultName, whole_city: true, options: opts } : { name: name.trim() || defaultName, area, streets: included, options: opts };
+      const job = await api.post<Job>('/api/jobs', body);
       onCreated(job.id);
     } catch (e: any) {
       setError(e.message);
@@ -128,7 +131,7 @@ export default function NewJob({ setMap, onCancel, onCreated }: Props) {
   }
 
   const chosen = names.filter(([, v]) => v.include).sort((a, b) => b[1].length - a[1].length).map(([n]) => n).filter((n) => n !== 'Unnamed street');
-  const defaultName = chosen.length === 0 ? 'New job' : chosen.length <= 2 ? chosen.join(' and ') : `${chosen[0]}, ${chosen[1]} and ${chosen.length - 2} more`;
+  const defaultName = source === 'city' ? 'City of Sydney' : chosen.length === 0 ? 'New job' : chosen.length <= 2 ? chosen.join(' and ') : `${chosen[0]}, ${chosen[1]} and ${chosen.length - 2} more`;
   const set = <K extends keyof Options>(k: K, v: Options[K]) => setOpts((o) => ({ ...o, [k]: v }));
 
   return (
@@ -143,7 +146,12 @@ export default function NewJob({ setMap, onCancel, onCreated }: Props) {
         <div className="seg" role="group" aria-label="How to choose streets">
           <button type="button" aria-pressed={source === 'area'} onClick={() => chooseSource('area')}>Block out an area</button>
           <button type="button" aria-pressed={source === 'street'} onClick={() => chooseSource('street')}>Draw streets</button>
+          <button type="button" aria-pressed={source === 'city'} onClick={() => chooseSource('city')} disabled={!status.local_streets} data-testid="whole-city">Whole city</button>
         </div>
+        {!status.local_streets && <p className="fineprint">Whole city needs the local street file. Run scripts/fetch_streets.py once.</p>}
+        {source === 'city' && (
+          <p className="hint">Every street inside the City of Sydney boundary. Big jobs are made for the Chrome extension: you can chip away at them whenever you have time.</p>
+        )}
 
         {source === 'area' && !area && (
           <p className="hint">Click around the block on the map. Click the first point again to close the shape.</p>
@@ -200,7 +208,7 @@ export default function NewJob({ setMap, onCancel, onCreated }: Props) {
         )}
       </section>
 
-      <section className="step" aria-disabled={!preview}>
+      <section className="step" aria-disabled={source !== 'city' && !included?.features.length}>
         <h2><span className="step-n">2</span>Plan the photos</h2>
         <label className="field">
           <span>Distance between photo points</span>
@@ -245,9 +253,13 @@ export default function NewJob({ setMap, onCancel, onCreated }: Props) {
         )}
 
         {preview && (
-          <p className="summary" data-testid="plan-summary">
-            <strong>{preview.summary.shots} photos</strong> at {preview.summary.points} points along {metres(preview.summary.length_m)}, split into {preview.summary.batches} prompt{preview.summary.batches === 1 ? '' : 's'}.
-          </p>
+          <div className="summary" data-testid="plan-summary">
+            <p><strong>{preview.summary.shots.toLocaleString()} photos</strong> at {preview.summary.points.toLocaleString()} points along {metres(preview.summary.length_m)} of {preview.summary.streets.toLocaleString()} streets.</p>
+            {preview.summary.shots > 500 && (
+              <p className="fineprint">At about 5 seconds a photo with the extension, that’s roughly {Math.max(1, Math.round((preview.summary.shots * 5) / 3600)).toLocaleString()} hours of capture, and about {Math.round((preview.summary.shots * 0.6) / 1000).toLocaleString()} GB of photos.</p>
+            )}
+            {preview.shots_omitted && <p className="fineprint">Too many to draw while planning. Once the job is created, zoom in on the map to see each photo.</p>}
+          </div>
         )}
         {preview?.warnings.map((w) => <p key={w} className="note">{w}</p>)}
       </section>

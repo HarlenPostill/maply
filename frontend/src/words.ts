@@ -6,6 +6,7 @@ export const STATUS_WORDS: Record<string, string> = {
   needs_check: 'Needs a look',
   no_imagery: 'No imagery',
   blocked: 'Footpath blocked',
+  skipped: 'Skipped',
   accepted: 'Looks right',
   retake: 'Retake',
 };
@@ -32,6 +33,11 @@ export function flagWords(shot: Shot): string[] {
 
 export function metres(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+}
+
+export function bytes(n: number | null | undefined): string {
+  if (!n) return '0 MB';
+  return n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`;
 }
 
 export function ago(iso: string | null): string {

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
+from shapely import STRtree
 from shapely.geometry import LineString, MultiLineString, Point, Polygon, shape
 from shapely.geometry.polygon import orient
 from shapely.ops import substring
@@ -37,7 +38,7 @@ from app.geo.projection import (
     within_area_of_use,
 )
 
-MAX_SAMPLES_PER_PLAN = 5000
+MAX_SAMPLES_PER_PLAN = 200_000  # whole-city jobs are ~30k points
 
 
 class PlanParams(BaseModel):
@@ -366,21 +367,22 @@ def generate_plan(
             sp.route_index = ri
             samples.append(sp)
 
-    # 5. crossings between different segments (excluding shared endpoints)
+    # 5. crossings between different segments (excluding shared endpoints).
+    #    Spatial index keeps this near-linear for citywide plans.
     keys = list(seg_lines_proj)
-    for i in range(len(keys)):
-        for j in range(i + 1, len(keys)):
-            a, b = seg_lines_proj[keys[i]], seg_lines_proj[keys[j]]
-            if not a.intersects(b):
+    route_of = {sg.key: sg.route_index for sg in segments}
+    tree = STRtree([seg_lines_proj[k] for k in keys])
+    for i, j in zip(*tree.query([seg_lines_proj[k] for k in keys], predicate="intersects")):
+        if j <= i:
+            continue
+        a, b = seg_lines_proj[keys[i]], seg_lines_proj[keys[j]]
+        inter = a.intersection(b)
+        for p in getattr(inter, "geoms", [inter]):
+            if not isinstance(p, Point):
                 continue
-            inter = a.intersection(b)
-            for p in getattr(inter, "geoms", [inter]):
-                if not isinstance(p, Point):
-                    continue
-                shared_end = _touches_end(a, p.coords[0]) and _touches_end(b, p.coords[0])
-                if shared_end:
-                    continue
-                add_node(p.x, p.y, "route_crossing", [keys[i], keys[j]])
+            if route_of[keys[i]] == route_of[keys[j]] and _touches_end(a, p.coords[0]) and _touches_end(b, p.coords[0]):
+                continue  # consecutive pieces of the same route, not an intersection
+            add_node(p.x, p.y, "route_crossing", [keys[i], keys[j]])
 
     # 6. crossing approaches, recorded separately from street samples
     seg_by_key = {s.key: s for s in segments}
