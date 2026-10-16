@@ -1,0 +1,12 @@
+# Keep the dataset, secrets and dev artefacts out of every image build context.
+data
+**/data
+.env
+.env.*
+.git
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+frontend/dist
+docs

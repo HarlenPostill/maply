@@ -1,0 +1,24 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "City of Sydney LGA (APPROXIMATE planning boundary)",
+        "warning": "Hand-digitised approximation for development only. Replace with the official LGA boundary (e.g. NSW Spatial Services or ABS ASGS LGA) and set SCOPE_GEOJSON_PATH before live collection."
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [151.1755, -33.8705], [151.1830, -33.8665], [151.1905, -33.8620],
+          [151.1985, -33.8560], [151.2050, -33.8530], [151.2150, -33.8545],
+          [151.2225, -33.8640], [151.2290, -33.8665], [151.2330, -33.8700],
+          [151.2365, -33.8790], [151.2330, -33.8870], [151.2270, -33.8935],
+          [151.2235, -33.9010], [151.2235, -33.9110], [151.2140, -33.9195],
+          [151.2010, -33.9230], [151.1880, -33.9180], [151.1800, -33.9050],
+          [151.1745, -33.8930], [151.1725, -33.8830], [151.1755, -33.8705]
+        ]]
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# Local research dataset, job state exports, logs and browser profiles. Never commit.
+/data/
+*.part
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+.DS_Store

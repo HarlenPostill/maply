@@ -1,0 +1,27 @@
+{
+  "name": "maply-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local operator dashboard for maply (Street View collection supervisor). No analytics, no external fonts or CDNs.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --host 127.0.0.1 --port 4173"
+  },
+  "dependencies": {
+    "@geoman-io/leaflet-geoman-free": "^2.20.2",
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.22",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.4"
+  }
+}
