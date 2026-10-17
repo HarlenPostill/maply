@@ -9,10 +9,11 @@ export type Options = {
   pitch: number;
   fov: number;
   corners: boolean;
+  divided_roads_near_side: boolean;
   batch_size: number;
 };
 
-export const DEFAULT_OPTIONS: Options = { spacing_m: 15, sides: 'both', angles: 1, pitch: -8, fov: 80, corners: false, batch_size: 20 };
+export const DEFAULT_OPTIONS: Options = { spacing_m: 15, sides: 'both', angles: 1, pitch: -8, fov: 80, corners: false, divided_roads_near_side: true, batch_size: 20 };
 
 export type Status = {
   version: string;
@@ -26,7 +27,7 @@ export type Status = {
 export type PlannedShot = { code: string; lat: number; lng: number; heading: number; fov: number; side: string; kind: string; street: string; look: string; url: string };
 
 export type Preview = {
-  summary: { shots: number; points: number; streets: number; length_m: number; batches: number; intersections: number };
+  summary: { shots: number; points: number; streets: number; length_m: number; batches: number; intersections: number; divided_road_views_skipped: number };
   warnings: string[];
   shots: PlannedShot[];
   shots_omitted: boolean;

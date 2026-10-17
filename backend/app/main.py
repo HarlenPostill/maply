@@ -226,18 +226,26 @@ def list_jobs(s: Session = Depends(get_db)):
 @app.post("/api/jobs")
 def create_job(req: JobCreate, s: Session = Depends(get_db)):
     name = req.name.strip() or ("City of Sydney" if req.whole_city else "Untitled job")
-    streets = _plan_inputs(req)
     try:
-        shots, segments, summary, warnings = plan_shots(streets, req.options, scope=SCOPE)
+        j, warnings = add_job(s, name, _plan_inputs(req), req.options, req.whole_city, shape(req.area) if req.area else None)
     except PlanningError as e:
         raise HTTPException(422, str(e)) from e
+    s.commit()
+    out = _job_dict(s, j, full=True)
+    out["warnings"] = warnings
+    return out
+
+
+def add_job(s: Session, name: str, streets: dict, options: JobOptions, whole_city: bool = False, area=None) -> tuple[Job, list[str]]:
+    """Plan the shots and add the job, its segments and shots, and its folder. The caller commits."""
+    shots, segments, summary, warnings = plan_shots(streets, options, scope=SCOPE)
     slug, n = slugify(name), 2
     while s.execute(select(Job.id).where(Job.slug == slug)).first() or (settings.jobs_dir / slug).exists():
         slug, n = f"{slugify(name)}-{n}", n + 1
-    area = SCOPE if req.whole_city else (shape(req.area) if req.area else None)
+    area = SCOPE if whole_city else area
     j = Job(
-        name=name, slug=slug, streets=streets, params={**req.options.model_dump(), "whole_city": req.whole_city},
-        batch_size=req.options.batch_size, area=from_shape(area, srid=4326) if area is not None else None,
+        name=name, slug=slug, streets=streets, params={**options.model_dump(), "whole_city": whole_city},
+        batch_size=options.batch_size, area=from_shape(area, srid=4326) if area is not None else None,
     )
     s.add(j)
     s.flush()
@@ -257,11 +265,8 @@ def create_job(req: JobCreate, s: Session = Depends(get_db)):
     ]
     for i in range(0, len(rows), 5000):
         s.execute(insert(Shot), rows[i : i + 5000])
-    write_job_folder(slug, name, req.options, shots, summary)
-    s.commit()
-    out = _job_dict(s, j, full=True)
-    out["warnings"] = warnings
-    return out
+    write_job_folder(slug, name, options, shots, summary)
+    return j, warnings
 
 
 @app.get("/api/jobs/{jid}")

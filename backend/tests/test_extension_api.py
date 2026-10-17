@@ -73,3 +73,53 @@ def test_capture_loop_and_dataset(client):
     rec = json.loads((Path(os.environ["DATA_DIR"]) / "jobs" / job["slug"] / "dataset" / "manifest.jsonl").read_text().splitlines()[0])
     assert rec["street"]["osm_tags"] == {"sidewalk": "both"} and rec["footpath"]["side"] in ("west", "east")
     assert rec["camera"]["offset_from_plan_m"] < 5 and rec["imagery_date"]["value"] == "2024-03" and rec["labels"] is None
+
+
+# A divided road: two one-way carriageways ~10 m apart.
+DIVIDED = {"type": "FeatureCollection", "features": [
+    {"type": "Feature", "properties": {"name": "Primrose Ave"}, "geometry": {"type": "LineString", "coordinates": [[151.20000, -33.9000], [151.20000, -33.8985]]}},
+    {"type": "Feature", "properties": {"name": "Primrose Ave"}, "geometry": {"type": "LineString", "coordinates": [[151.20011, -33.8985], [151.20011, -33.9000]]}},
+]}
+
+
+def test_replanned_job_keeps_finished_photos_and_leaves_the_old_job_alone(client):
+    import uuid
+
+    from app.carry_over import carry_over
+    from app.db import session_scope
+    from app.main import add_job
+    from app.models import Job
+    from app.shots import JobOptions
+
+    old = client.post("/api/jobs", json={"name": "Primrose", "streets": DIVIDED, "options": {"spacing_m": 30, "divided_roads_near_side": False}}).json()
+    items = client.get(f"/api/jobs/{old['id']}/shots?limit=100").json()["items"]
+    west_carriageway = [x for x in items if x["lng"] == 151.2]
+    near = next(x for x in west_carriageway if x["footpath"] == "west")
+    far = next(x for x in west_carriageway if x["footpath"] == "east")  # looks across the other carriageway
+    blocked = next(x for x in west_carriageway if x["footpath"] == "west" and x["id"] != near["id"])
+    for x in (near, far):
+        url = f"https://www.google.com/maps/@{x['lat']:.7f},{x['lng']:.7f},3a,80y,{x['heading']:.2f}h,82t/data=!3m4!1e1!3m2!1sPANO!2e0"
+        assert client.post("/api/ext/capture", headers=H, json={"shot_id": x["id"], "image": _jpeg(), "page_url": url, "image_date_text": "Mar 2024"}).status_code == 200
+    client.post("/api/ext/mark", headers=H, json={"shot_id": blocked["id"], "status": "blocked"})
+    before = client.get(f"/api/jobs/{old['id']}").json()["counts"]
+
+    with session_scope() as s:
+        src = s.get(Job, uuid.UUID(old["id"]))
+        dst, _ = add_job(s, "Primrose fixed", src.streets, JobOptions(spacing_m=30))
+        report = carry_over(s, src, dst)
+        new_id, new_slug = str(dst.id), dst.slug
+    assert report["copied_by_status"] == {"captured": 1, "blocked": 1} and report["not_in_new_plan_by_status"] == {"captured": 1}
+
+    new = {x["code"]: x for x in client.get(f"/api/jobs/{new_id}/shots?limit=100").json()["items"]}
+    assert far["code"] not in new and new[blocked["code"]]["status"] == "blocked"
+    copied = new[near["code"]]
+    assert copied["status"] == "captured" and copied["result"]["pano_id"] == "PANO" and copied["result"]["image_date_iso"] == "2024-03"
+    jobs = Path(os.environ["DATA_DIR"]) / "jobs"
+    assert (jobs / new_slug / copied["result"]["file"]).is_file() and (jobs / new_slug / copied["result"]["thumb"]).is_file()
+    # the old job is untouched, files included
+    assert client.get(f"/api/jobs/{old['id']}").json()["counts"] == before
+    assert (jobs / old["slug"] / client.get(f"/api/shots/{near['id']}").json()["result"]["file"]).is_file()
+    # running it again doesn't redo or overwrite anything
+    with session_scope() as s:
+        again = carry_over(s, s.get(Job, uuid.UUID(old["id"])), s.get(Job, uuid.UUID(new_id)))
+    assert again["copied"] == 0 and again["already_done_in_target"] == 2

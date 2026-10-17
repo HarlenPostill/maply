@@ -8,16 +8,18 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import re
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 from shapely import STRtree
 from shapely.geometry import LineString, Point, shape
+from shapely.ops import nearest_points
 
 from app.config import get_settings
 from app.geo.planning import PlanParams, PlanningError, generate_plan
-from app.geo.projection import to_projected
+from app.geo.projection import perpendicular_heading, to_projected
 from app.geo.streetview_url import build_maps_pano_url
 
 COMPASS_16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
@@ -41,6 +43,7 @@ class JobOptions(BaseModel):
     pitch: float = Field(-8.0, ge=-40.0, le=20.0)
     fov: float = Field(80.0, ge=30.0, le=100.0)
     corners: bool = Field(False, description="Extra photos looking into each intersection")
+    divided_roads_near_side: bool = Field(True, description="On divided roads, photograph each footpath only from the carriageway beside it")
     batch_size: int = Field(20, ge=5, le=100)
 
     def plan_params(self) -> PlanParams:
@@ -93,6 +96,47 @@ def describe(street: str, kind: str, view_kind: str, side_heading: float | None,
     return f"{side} footpath of {where}, {angle}; {h}"
 
 
+DIVIDED_ROAD_MAX_GAP_M = 30.0  # carriageways of one road are closer than this; wider same-name pairs are mostly loops and plazas
+PARALLEL_DEG = 30.0
+
+
+class DividedRoads:
+    """OpenStreetMap draws a divided road as two one-way lines with the same name.
+
+    From each carriageway, the view toward the other one looks across the median at
+    the far footpath, which the other carriageway already photographs up close. A
+    side faces the other carriageway if a short probe from the camera, square to the
+    street, crosses a roughly parallel line of the same street.
+    """
+
+    def __init__(self, lines: list[tuple[LineString, str]]):
+        self.lines = [to_projected(ln) for ln, _ in lines]
+        self.names = [nm for _, nm in lines]
+        self.tree = STRtree(self.lines)
+
+    def faces_other_carriageway(self, lng: float, lat: float, heading: float, name: str) -> bool:
+        if not name or name == "Unnamed street":  # can't tell two unnamed lines are the same road
+            return False
+        p = to_projected(Point(lng, lat))
+        dx, dy = math.sin(math.radians(heading)), math.cos(math.radians(heading))
+        probe = LineString([(p.x + dx * 2.5, p.y + dy * 2.5), (p.x + dx * DIVIDED_ROAD_MAX_GAP_M, p.y + dy * DIVIDED_ROAD_MAX_GAP_M)])
+        # 1 m of slack (the probe starts clear of the camera's own line): carriageways often end level
+        # with each other, and a true-north heading runs about 1° off the map grid, so an exact probe can just miss an end.
+        for k in self.tree.query(probe, predicate="dwithin", distance=1.0):
+            if self.names[k] != name:
+                continue
+            other = self.lines[k]
+            q = nearest_points(probe, other)[1]
+            if abs(abs(heading - _grid_bearing(other, other.project(q))) % 180 - 90) <= PARALLEL_DEG:
+                return True
+        return False
+
+
+def _grid_bearing(line: LineString, c: float, window: float = 3.0) -> float:
+    a, b = line.interpolate(max(0.0, c - window)), line.interpolate(min(line.length, c + window))
+    return math.degrees(math.atan2(b.x - a.x, b.y - a.y))
+
+
 def plan_shots(streets: dict, options: JobOptions, scope=None) -> tuple[list[ShotSpec], list[dict], dict, list[str]]:
     """Return (shots, segments, summary, warnings) for a FeatureCollection of street lines."""
     warnings: list[str] = []
@@ -126,20 +170,30 @@ def plan_shots(streets: dict, options: JobOptions, scope=None) -> tuple[list[Sho
     # distance from each photo point to the nearest intersection / corner node
     node_pts = [to_projected(Point(n.lon, n.lat)) for n in plan.nodes if n.kind != "route_endpoint"]
     node_tree = STRtree(node_pts) if node_pts else None
+    divided = DividedRoads(lines) if options.divided_roads_near_side else None
 
-    n_points = len(plan.samples)
-    width = max(3, len(str(n_points)))
+    # Points are numbered before any views are left out, so a shot keeps its code
+    # whether or not divided roads are handled.
+    width = max(3, len(str(len(plan.samples))))
     shots: list[ShotSpec] = []
-    n = 0
+    n = n_points = skipped = 0
     for i, sp in enumerate(plan.samples, start=1):
         street = lines[seg_route[sp.segment_key]][1]
         folder = slugify(street or "unnamed-street")
         kind = "corner" if sp.kind == "crossing_approach" else "street"
+        views = sp.views
+        if divided is not None and kind == "street":
+            far = {sd for sd in {v.side for v in views} if divided.faces_other_carriageway(sp.lon, sp.lat, perpendicular_heading(sp.local_bearing_deg, sd), street)}
+            views = [v for v in views if v.side not in far]
+            skipped += len(sp.views) - len(views)
+        if not views:
+            continue
+        n_points += 1
         near = None
         if node_tree is not None:
             p = to_projected(Point(sp.lon, sp.lat))
             near = round(p.distance(node_pts[int(node_tree.nearest(p))]), 1)
-        for v in sp.views:
+        for v in views:
             if kind == "corner":
                 suffix = _CORNER.get(v.view_kind, "C")
                 side_heading = None
@@ -184,6 +238,7 @@ def plan_shots(streets: dict, options: JobOptions, scope=None) -> tuple[list[Sho
         "length_m": round(sum(s.length_m for s in plan.segments)),
         "batches": (len(shots) - 1) // options.batch_size + 1 if shots else 0,
         "intersections": sum(1 for nd in plan.nodes if nd.kind != "route_endpoint"),
+        "divided_road_views_skipped": skipped,
     }
     return shots, segments, summary, warnings
 

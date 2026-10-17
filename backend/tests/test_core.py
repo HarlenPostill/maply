@@ -47,6 +47,27 @@ def test_reverse_drawn_street_still_describes_the_same_footpath():
     assert left.heading == pytest.approx(97.5, abs=1) and "east footpath" in left.look
 
 
+# A divided road drawn as two one-way carriageways ~10 m apart, and a different street ~10 m further east.
+DIVIDED = {"type": "FeatureCollection", "features": [
+    {"type": "Feature", "properties": {"name": "Primrose Ave"}, "geometry": {"type": "LineString", "coordinates": [[151.20000, -33.9000], [151.20000, -33.8985]]}},
+    {"type": "Feature", "properties": {"name": "Primrose Ave"}, "geometry": {"type": "LineString", "coordinates": [[151.20011, -33.8985], [151.20011, -33.9000]]}},
+    {"type": "Feature", "properties": {"name": "Other Street"}, "geometry": {"type": "LineString", "coordinates": [[151.20022, -33.9000], [151.20022, -33.8985]]}},
+]}
+
+
+def test_divided_roads_photograph_only_the_footpath_beside_each_carriageway():
+    both, *_ = plan_shots(DIVIDED, JobOptions(spacing_m=30, divided_roads_near_side=False))
+    near, _, summary, _ = plan_shots(DIVIDED, JobOptions(spacing_m=30))
+    west, east = [s for s in near if s.lng == 151.2], [s for s in near if s.lng == 151.20011]
+    assert west and {s.footpath for s in west} == {"west"}
+    assert east and {s.footpath for s in east} == {"east"}
+    assert {s.footpath for s in near if s.street == "Other Street"} == {"west", "east"}  # a different street is not a carriageway
+    assert summary["divided_road_views_skipped"] == len(both) - len(near) == len(west) + len(east)
+    # the shots that remain are the same shots, with the same codes
+    old = {s.code: (s.lat, s.lng, s.heading, s.footpath) for s in both}
+    assert all(old[s.code] == (s.lat, s.lng, s.heading, s.footpath) for s in near)
+
+
 def test_batches_and_prompt_contents():
     shots, *_ = plan_shots(GEORGE, JobOptions(spacing_m=15, batch_size=5))
     assert max(s.batch for s in shots) == (len(shots) - 1) // 5 + 1

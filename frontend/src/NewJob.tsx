@@ -241,6 +241,10 @@ export default function NewJob({ status, setMap, onCancel, onCreated }: Props) {
           <input type="checkbox" checked={opts.corners} onChange={(e) => set('corners', e.target.checked)} />
           <span>Also photograph into each intersection</span>
         </label>
+        <label className="check">
+          <input type="checkbox" checked={opts.divided_roads_near_side} onChange={(e) => set('divided_roads_near_side', e.target.checked)} />
+          <span>On divided roads, photograph each footpath only from the side of the road it's on</span>
+        </label>
 
         <button type="button" className="disclosure" aria-expanded={more} onClick={() => setMore(!more)}>Camera and prompt options</button>
         {more && (
@@ -255,6 +259,9 @@ export default function NewJob({ status, setMap, onCancel, onCreated }: Props) {
         {preview && (
           <div className="summary" data-testid="plan-summary">
             <p><strong>{preview.summary.shots.toLocaleString()} photos</strong> at {preview.summary.points.toLocaleString()} points along {metres(preview.summary.length_m)} of {preview.summary.streets.toLocaleString()} streets.</p>
+            {preview.summary.divided_road_views_skipped > 0 && (
+              <p className="fineprint">Left out {preview.summary.divided_road_views_skipped.toLocaleString()} views across divided roads: those footpaths are photographed from the carriageway beside them.</p>
+            )}
             {preview.summary.shots > 500 && (
               <p className="fineprint">At about 5 seconds a photo with the extension, that’s roughly {Math.max(1, Math.round((preview.summary.shots * 5) / 3600)).toLocaleString()} hours of capture, and about {Math.round((preview.summary.shots * 0.6) / 1000).toLocaleString()} GB of photos.</p>
             )}

@@ -31,10 +31,20 @@ cd backend && uv sync && uv run python ../scripts/fetch_streets.py
 * **Block out an area:** outline a few blocks on the map.
 * **Draw streets:** click along individual streets.
 * **Whole city:** every street inside the City of Sydney boundary. At 15 m spacing
-  that's about 62,700 photos along 436 km of streets. Ticking *Also photograph into
-  each intersection* adds corner views for kerb ramps (about 102,000 photos).
+  that's about 58,300 photos along 436 km of streets. Ticking *Also photograph into
+  each intersection* adds corner views for kerb ramps.
 
-Then set the spacing, which footpaths, and the views per point. Each shot gets a
+Then set the spacing, which footpaths, and the views per point.
+
+Divided roads (Anzac Parade, Oxford Street, Primrose Ave, …) are drawn in
+OpenStreetMap as two one-way lines. By default each carriageway only photographs
+the footpath beside it: a view toward the other carriageway would look across
+the median at a footpath the other line already covers up close. Two lines count
+as one divided road when they share a name, run roughly parallel and are under
+30 m apart. Untick *On divided roads, photograph each footpath only from the side
+of the road it's on* to photograph both sides of every line.
+
+Each shot gets a
 Street View link in Google's documented format
 (`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=LAT,LNG&heading=H&pitch=P&fov=F`)
 that opens at the planned spot, already facing the planned direction.
@@ -75,6 +85,19 @@ at `127.0.0.1`.
 
 Prefer to hand batches to Codex? Each job also has **Hand photos to Codex
 instead**: copyable prompts plus a *Check photos* step.
+
+**Re-planning a job you've started.** After a planner change, make a new job
+from an existing one and bring your finished photos across:
+
+```bash
+cd backend && uv run python ../scripts/replan_job.py city-of-sydney --name "City of Sydney (divided roads fixed)"
+```
+
+The new job uses the old job's streets and options, so shots the new plan still
+has keep their codes, and their photos, checks and status are copied over. The
+old job is only read; shots the new plan dropped stay there. If you take more
+photos in the old job afterwards, add `--into <new job folder>` to copy them
+across too (shots already done in the new job are left alone).
 
 ## 3. Use the dataset
 
@@ -140,8 +163,9 @@ After changing the extension, click its reload icon on `chrome://extensions`.
 ## Limitations
 
 * The City of Sydney boundary in `config/` is a hand-drawn approximation.
-* Divided roads appear in OpenStreetMap as two one-way lines, so both sides of
-  each carriageway get photos. Untick or redraw them in small jobs if that's unwanted.
+* Divided roads are recognised from the map alone (same name, parallel, under
+  30 m apart). Where the two carriageways have different names, or one of them is
+  outside the boundary, both sides of the remaining line are still photographed.
 * Photos include Google's on-screen controls around the edges. Crop fixed
   margins before analysis if they get in the way.
 * The extension reads the camera position and imagery date from Google's page
