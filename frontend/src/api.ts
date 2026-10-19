@@ -50,6 +50,10 @@ export type JobSummary = {
 };
 
 export type Shot = PlannedShot & {
+  confidence?: ConfidenceSummary | null;
+  segment_key: string;
+  labels: AccessibilityLabels | null;
+  tagging: { status: string; error: string | null; needs_review: boolean; model: string | null; updated_at: string | null } | null;
   id: string;
   ordinal: number;
   batch: number;
@@ -73,6 +77,42 @@ export type Job = JobSummary & { area: Geo | null; streets: FC | null; street_co
 export type ShotPage = { total: number; items: Shot[] };
 
 export type Prompt = { text: string; shots: string[]; label: string; log_file: string; batches: number };
+
+export type VisionTag = { value: string; confidence: number | null; evidence: string; visibility: string };
+export type AccessibilityFeature = {
+  id: string;
+  kind: 'footpath_section' | 'driveway' | 'kerb_ramp' | 'crossing' | 'hazard';
+  region: [number, number, number, number] | null;
+  location_description: string;
+  tags: Record<string, VisionTag>;
+};
+export type AccessibilityLabels = {
+  schema_version: 'maply-accessibility/1';
+  footpath: VisionTag;
+  features: AccessibilityFeature[];
+  notes: string[];
+  review_reasons: string[];
+  provenance?: { imagery_date?: string | null; [key: string]: unknown };
+};
+export type TagCounts = { eligible: number; unlabelled: number; queued: number; running: number; completed: number; failed: number; needs_review: number; cancelled: number };
+export type ConfidenceSummary = { mean: number | null; minimum: number | null; known: number; unknown: number; images?: number };
+export type TaggingSummary = {
+  counts: TagCounts;
+  confidence?: ConfidenceSummary | null;
+  streets: (TagCounts & { street: string; confidence?: ConfidenceSummary | null })[];
+  worker: { online: boolean; last_seen: string | null; model: string | null; error?: string | null };
+  model: string;
+};
+export type TagSelector = { streets?: string[]; segment_keys?: string[]; shot_ids?: string[]; side?: 'left' | 'right' | 'none'; retry?: boolean };
+export type ActivityEvent = { id: string | number; kind: string; message: string; data: Record<string, unknown>; created_at: string };
+export type ActivityItem = {
+  task_id: string; shot_id: string; code: string; street: string; side: string;
+  status: string; model: string | null; attempts: number; error: string | null;
+  updated_at: string; started_at: string | null; events: ActivityEvent[];
+  confidence: ConfidenceSummary | null; queue_position?: number | null;
+};
+export type UsageSnapshot = { status: 'available' | 'unavailable'; fetched_at: string; source: string; groups: { name: string; buckets: { id: string; name: string; window: string; remaining_fraction: number | null; reset_time?: string | null }[] }[]; error?: string };
+export type ActivitySnapshot = { items: ActivityItem[]; counts: TagCounts; usage: UsageSnapshot | null; total: number };
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {

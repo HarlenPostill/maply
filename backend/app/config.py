@@ -1,5 +1,5 @@
-"""Settings. There are no API keys: maply only plans jobs, writes prompts for
-you to give to Codex, and reads back the screenshots Codex saves."""
+"""Local app settings. Optional vision inference uses a separately running host
+worker and the existing Antigravity CLI login; no API keys are stored here."""
 
 from __future__ import annotations
 

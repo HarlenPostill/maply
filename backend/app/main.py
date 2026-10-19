@@ -21,14 +21,14 @@ from PIL import Image
 from pydantic import BaseModel, Field
 from shapely.geometry import LineString, MultiPolygon, Point, mapping, shape
 from sqlalchemy import BigInteger, func, insert, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app import dataset, osm, prompts, results
+from app import dataset, osm, prompts, results, tagging
 from app.config import get_settings
 from app.db import get_db
 from app.geo.planning import PlanningError
-from app.models import Job, Segment, Shot
+from app.models import Job, Segment, Shot, TagTask
 from app.shots import JobOptions, plan_shots, slugify, write_job_folder
 
 settings = get_settings()
@@ -39,6 +39,7 @@ app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=[h.strip() for h in os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",") if h.strip()],
 )
+app.include_router(tagging.router)
 
 SCOPE = MultiPolygon([shape(f["geometry"]) for f in json.loads(settings.scope_geojson_path.read_text())["features"]])
 DONE = ("captured", "accepted", "no_imagery", "blocked", "needs_check")
@@ -106,15 +107,17 @@ def _counts(s: Session, jid) -> dict:
     return c
 
 
-def _shot_dict(sh: Shot, slug: str) -> dict:
+def _shot_dict(sh: Shot, slug: str, include_labels: bool = True) -> dict:
     r = sh.result or {}
-    v = int(r.get("saved_at") or 0)
+    v = r.get("sha256") or int(r.get("saved_at") or 0)
     return {
         "id": str(sh.id), "code": sh.code, "ordinal": sh.ordinal, "batch": sh.batch, "street": sh.street, "kind": sh.kind,
         "side": sh.side, "footpath": sh.footpath, "view_kind": sh.view_kind, "lat": sh.lat, "lng": sh.lng, "heading": sh.heading,
         "pitch": sh.pitch, "fov": sh.fov, "url": sh.url, "filename": sh.filename, "status": sh.status, "flags": sh.flags,
         "note": sh.note, "near_node_m": sh.near_node_m, "captured_at": sh.captured_at.isoformat() if sh.captured_at else None,
         "capture_source": sh.capture_source, "result": r, "look": r.get("look", ""),
+        "segment_key": sh.segment_key, "labels": tagging.labels_for(sh) if include_labels else None, "tagging": tagging.task_dict(sh),
+        "confidence": tagging.shot_confidence(sh),
         "image_url": f"/files/{slug}/{r['file']}?v={v}" if r.get("file") else None,
         "thumb_url": f"/files/{slug}/{r['thumb']}?v={v}" if r.get("thumb") else None,
     }
@@ -279,6 +282,11 @@ def list_shots(
     jid: uuid.UUID,
     bbox: str | None = Query(None, description="west,south,east,north"),
     status: str | None = None,
+    street: str | None = None,
+    segment_key: str | None = None,
+    side: str | None = Query(None, pattern="^(left|right|none)$"),
+    tagging_status: str | None = Query(None, pattern="^(unlabelled|queued|running|completed|failed|cancelled)$"),
+    include_labels: bool = True,
     batch: int | None = None,
     order: str = Query("ordinal", pattern="^(ordinal|recent)$"),
     offset: int = 0,
@@ -292,11 +300,21 @@ def list_shots(
         q = q.where(Shot.geom.intersects(func.ST_MakeEnvelope(w, so, e, n, 4326)))
     if status:
         q = q.where(Shot.status.in_(status.split(",")))
+    if street is not None:
+        q = q.where(Shot.street == street)
+    if segment_key is not None:
+        q = q.where(Shot.segment_key == segment_key)
+    if side is not None:
+        q = q.where(Shot.side == side)
+    if tagging_status:
+        q = q.outerjoin(TagTask, TagTask.shot_id == Shot.id).where(tagging.eligible(), tagging.task_status() == tagging_status)
     if batch:
         q = q.where(Shot.batch == batch)
     total = s.execute(select(func.count()).select_from(q.subquery())).scalar_one()
     q = q.order_by(Shot.captured_at.desc().nulls_last(), Shot.ordinal) if order == "recent" else q.order_by(Shot.ordinal)
-    items = [_shot_dict(x, j.slug) for x in s.execute(q.offset(offset).limit(limit)).scalars()]
+    if not include_labels:
+        q = q.options(defer(Shot.labels))
+    items = [_shot_dict(x, j.slug, include_labels) for x in s.execute(q.offset(offset).limit(limit)).scalars()]
     return {"total": total, "items": items}
 
 

@@ -5,8 +5,8 @@ Writes, inside the job folder:
   dataset/schema.json      what each field means
   dataset/README.md        how to use it
 
-Streams from the database, so it works for 100k-photo jobs. `labels` is left
-null: it is reserved for phase 2 (accessibility tags from image analysis).
+Streams from the database, so it works for 100k-photo jobs. Labels contain
+versioned accessibility observations when the current image has been analysed.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Job, Segment, Shot
+from app.tag_schema import LabelResult, SCHEMA_VERSION
+from app.tagging import labels_for, task_dict
 
 VIEW_WORDS = {
     "perpendicular": "straight across",
@@ -50,18 +52,12 @@ SCHEMA = {
         "near_intersection_m": "Distance from the photo point to the nearest intersection or corner (useful for kerb ramps)",
         "imagery_date": "Month the imagery was captured, from on-screen text; null when not shown",
         "quality.status / flags": "maply's checks: e.g. moved, heading_off, wrong_side, no_image_date",
-        "labels": "Reserved for phase 2 accessibility tags. Null until then.",
+        "labels": "Accessibility observations for the current image, including per-tag confidence, evidence, image regions, review reasons and provenance. Null until analysed. Confidence is model-reported, not calibrated accuracy.",
+        "tagging": "Queue state, model, attempts and review status. Completed means analysed, not verified accessible.",
     },
-    "suggested_labels_for_phase_2": {
-        "footpath_present": "yes | no | unclear",
-        "footpath_condition": "good | cracked | uneven | obstructed | unclear",
-        "kerb_type": "barrier | mountable | flush | none | unclear",
-        "kerb_ramp": "present | absent | not_applicable | unclear",
-        "tactile_indicators": "present | absent | unclear",
-        "obstructions": ["pole", "bin", "parked_vehicle", "outdoor_dining", "construction", "other"],
-        "surface": "concrete | pavers | asphalt | gravel | other | unclear",
-        "notes": "free text",
-    },
+    "label_schema_version": SCHEMA_VERSION,
+    "label_schema": LabelResult.model_json_schema(),
+    "label_provenance": "Server-added provenance contains image SHA256, model/provider, tagged_at, imagery_date, shot_id, segment_key, side and confidence_kind.",
 }
 
 
@@ -121,7 +117,8 @@ def export(s: Session, job: Job) -> dict:
                 "near_intersection_m": sh.near_node_m,
                 "imagery_date": {"value": r.get("image_date_iso"), "shown_as": r.get("image_date")},
                 "quality": {"status": sh.status, "flags": list(sh.flags or []), "reviewed": sh.status in ("accepted", "retake")},
-                "labels": sh.labels,
+                "labels": labels_for(sh),
+                "tagging": task_dict(sh),
             }
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             n += 1

@@ -8,7 +8,7 @@ the metadata an image model will need later: street, OSM tags, footpath side,
 planned and actual camera position and heading, distance to the nearest
 intersection, and imagery date.
 
-maply runs locally. It needs no API keys and uploads nothing.
+Maply runs locally. Capture and planning need no API keys. Optional accessibility tagging sends selected photos to Gemini through your signed-in Antigravity CLI; it does not require a separate Gemini API key.
 
 ## Start
 
@@ -95,11 +95,105 @@ cd backend && uv run python ../scripts/replan_job.py city-of-sydney --name "City
 
 The new job uses the old job's streets and options, so shots the new plan still
 has keep their codes, and their photos, checks and status are copied over. The
-old job is only read; shots the new plan dropped stay there. If you take more
+old job is only read; shots the new plan dropped stay there. Completed labels
+are also carried across when they match the copied image, retaining the original
+inference provenance; stale labels and unfinished tagging work are not copied. If you take more
 photos in the old job afterwards, add `--into <new job folder>` to copy them
 across too (shots already done in the new job are left alone).
 
-## 3. Use the dataset
+## 3. Tag captured images with Gemini
+
+Start Maply as usual (`docker compose up -d --build`). Run the vision worker in a
+second terminal **on your Mac**, where Antigravity is installed and signed in:
+
+```bash
+agy models  # verify your login and gemini-3.8-flash-low availability
+cd backend
+uv sync
+uv run python ../scripts/tag_worker.py
+```
+
+The default is `gemini-3.8-flash-low`, tested with the signed-in CLI on existing
+job images. It uses structured JSON output with strict server validation.
+
+The Docker app keeps a persistent queue in Postgres. The host worker downloads
+one selected image at a time from your local app, calls Antigravity in read-only
+plan mode, and saves validated structured results back to Maply. Credentials stay
+with Antigravity on your Mac. Leave the worker terminal running while tagging.
+Use `--api-url http://127.0.0.1:8001` if you changed the app port;
+`--agy-bin /path/to/agy` (or `MAPLY_AGY_BIN`) overrides executable discovery.
+`--once` processes at most one image; `--max-tasks 2` runs a bounded pilot.
+
+In a job:
+
+1. Open **Tagging progress** on the map. Search and select one or more streets,
+   or click a road section. Choose all sides, left, right or intersection views.
+   **Show selection on map** zooms to those streets or that section.
+2. Press **Tag selected streets** or **Tag this section**. Only saved images
+   (`captured`, `accepted`, `needs_check`) are eligible; retakes and missing images
+   are excluded. Completed images and already active work are skipped.
+3. The overview lines show unlabelled, queued, running, partial, completed and
+   failed analysis. Counts describe **saved images analysed**, not capture
+   coverage or verified wheelchair access. Left/right follow the segment's
+   stored direction. A section is a planned road segment, not a surveyed footpath.
+4. Open an image from its section or **Photos** to inspect observations, each
+   tag's confidence and evidence, review reasons, and highlighted image regions.
+   Coloured, numbered regions are visible by default; the matching legend lets
+   you focus a section, and unchecking **Show feature regions** reveals the original image.
+   Individual images can also be submitted from this view. Filter Photos by
+   tagging status to find completed or failed work.
+5. Open **Live tagging activity** for the current model/stage, elapsed time,
+   provider tool events, reported token counts, the ordered queue and recent
+   outcomes. Open or cancel individual queued images here. Activity is streamed
+   from the server, with polling as a fallback; elapsed time is not an ETA.
+
+The activity panel also shows the account allowance returned by Antigravity's
+supported `/usage` command: remaining percentage per model group/window, reset
+time and when it was checked. The host worker refreshes this in the background
+at most every five minutes. Unavailable values are shown as unavailable; image
+capacity is not estimated from token allowances. These limits are shared with
+other usage of the same account.
+
+An image's high-level confidence is the mean of its known observation scores,
+including footpath presence and all feature tags. Unknowns are excluded from
+that mean and counted separately; an entirely unknown image has no score.
+Street/job confidence is the mean of the scored image means, so images with more
+tags do not dominate. Cards also show the lowest tag score, unknown counts and
+tagged-image coverage. Scores describe model certainty, not accessibility or
+measured accuracy. Existing valid results receive these summaries automatically.
+
+Only provider tool/status events, numeric token usage and a preview of the
+returned annotation are exposed. Raw tool arguments and internal reasoning are
+not logged to the activity panel. Events persist per task attempt; retries show
+the current attempt. The full annotation is accepted only after validation.
+
+**Retry failed / cancelled** queues unsuccessful selected images and any still
+unlabelled images. **Cancel selected work** invalidates queued/running results;
+an in-flight CLI call may finish, but its result will not be applied. Pending
+work survives app restarts. A disconnected worker's running task becomes failed
+after its five-minute lease expires; retry it explicitly. Authentication, quota,
+validation and timeout errors are shown rather than counted as completed.
+The worker validates annotations before submission. An invalid annotation gets
+one correction attempt using the same image and the specific validation errors
+(at most two model calls per task). If correction fails, the image stays failed
+with the reason shown; invalid or contradictory labels are never accepted.
+
+The schema covers footpath presence, separate surface sections, driveway
+pedestrian crossings and both joins, kerb ramps and crossing context, slopes,
+clearance and local hazards. Every known tag has a model-reported confidence
+between 0 and 1 and a visual explanation. Unknown tags have null confidence and
+an explanation. Confidence is **not calibrated accuracy**. Absent footpaths stop
+detail tagging; obscured areas remain unknown. Camera coordinates are never
+presented as precise feature coordinates. Unknowns, low confidence and potential
+route barriers are flagged for review, even when analysis completed successfully.
+
+Results are linked to the image SHA256. Changed images cannot receive an old
+in-flight result, and stale labels are excluded from display/export. Successful
+attempts are also saved under `data/jobs/<job>/labels/` with their model, imagery
+date, tagging date and source hash. **Write dataset file** includes current labels
+and queue state in the export.
+
+## 4. Use the dataset
 
 Everything for a job lives in one folder on your Mac:
 
@@ -109,7 +203,8 @@ data/jobs/<job>/
   thumbs/<street>/...                                  480 px previews
   shots.csv                                            every planned shot
   dataset/manifest.jsonl                               written by "Write dataset file"
-  dataset/schema.json                                  field descriptions + suggested labels
+  dataset/schema.json                                  field descriptions + label schema
+  labels/<shot>_<task>_<attempt>.json                   successful annotation attempts
 ```
 
 `manifest.jsonl` has one line per photo:
@@ -125,10 +220,12 @@ data/jobs/<job>/
  "quality": {"status": "captured", "flags": []}, "labels": null}
 ```
 
-`labels` is reserved for phase 2, when an image model adds accessibility tags.
-`schema.json` suggests fields: footpath present, condition, kerb type, kerb
-ramp, tactile indicators, obstructions, surface. The database has a matching
-`labels` column ready.
+`labels` is null until an image is analysed. Completed labels use
+`maply-accessibility/1`: footpath presence, feature records with image regions,
+per-tag values/confidence/evidence, review reasons and provenance. `schema.json`
+contains the model-output JSON schema; stored labels also include server-added
+provenance. The `tagging` field records processing state independently of capture
+status.
 
 **Disk space:** photos are JPEGs of your browser window. At the extension's
 default quality, expect roughly 0.3–1 MB each, so 20–60 GB for the whole city.

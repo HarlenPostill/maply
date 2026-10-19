@@ -14,6 +14,11 @@ export type MapState = {
   onViewChange?: (bbox: [number, number, number, number], zoom: number) => void;
   selectedId?: string | null;
   fitKey?: string;
+  focusBounds?: [number, number, number, number] | null;
+  focusKey?: number;
+  taggingSegments?: FC | null;
+  selectedSegment?: string | null;
+  onSegmentClick?: (key: string) => void;
 };
 
 const EMPTY_MAP: MapState = { area: null, streets: null, cones: [], drawMode: null };
@@ -51,7 +56,7 @@ export default function App() {
       <aside className="panel">
         <header className="brand">
           <button type="button" className="wordmark" onClick={() => { setView({ kind: 'home' }); loadJobs(); }}>maply</button>
-          <span className="brand-note">Street View photo jobs</span>
+          <span className="brand-note">Street imagery & accessibility</span>
         </header>
 
         {view.kind === 'home' && (

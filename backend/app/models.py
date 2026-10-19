@@ -13,7 +13,7 @@ from datetime import datetime
 from geoalchemy2 import Geometry
 from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
@@ -88,3 +88,47 @@ class Shot(Base):
     flags: Mapped[list[str]] = mapped_column(ARRAY(String), default=list, nullable=False)
     result: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    tag_task: Mapped[TagTask | None] = relationship("TagTask", uselist=False, lazy="selectin", viewonly=True)
+
+
+class TagTask(Base):
+    __tablename__ = "tag_tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shots.id", ondelete="CASCADE"), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True, nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    image_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    worker_id: Mapped[str | None] = mapped_column(String(100))
+    lease_token: Mapped[str | None] = mapped_column(String(64))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    needs_review: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    confidence: Mapped[dict | None] = mapped_column(JSONB)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TagWorker(Base):
+    __tablename__ = "tag_workers"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    usage: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class TagTaskEvent(Base):
+    __tablename__ = "tag_task_events"
+    __table_args__ = (Index("ix_tag_task_events_task_attempt", "task_id", "attempt", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tag_tasks.id", ondelete="CASCADE"), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    data: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -27,6 +27,11 @@ type Props = {
   onConeClick?: (id: string) => void;
   selectedId?: string | null;
   fitKey?: string;
+  focusBounds?: [number, number, number, number] | null;
+  focusKey?: number;
+  taggingSegments?: FC | null;
+  selectedSegment?: string | null;
+  onSegmentClick?: (key: string) => void;
 };
 
 const SYDNEY: L.LatLngExpression = [-33.8735, 151.207];
@@ -66,14 +71,18 @@ const TONES: Record<Cone['tone'], L.PathOptions> = {
   muted: { color: '#8a9499', fillColor: '#8a9499', fillOpacity: 0.35, dashArray: '2 2' },
 };
 
-export default function MapView({ status, area, streets, cones, drawMode, onDrawn, onConeClick, selectedId, fitKey, onViewChange }: Props) {
+export const TAG_COLORS: Record<string, string> = { unlabelled: '#94a3a5', queued: '#8663bc', running: '#246fa9', completed: '#2c7a4b', failed: '#bb4234', partial: '#bd8a17', unavailable: '#c5ccca' };
+
+export default function MapView({ status, area, streets, cones, drawMode, onDrawn, onConeClick, selectedId, fitKey, onViewChange, taggingSegments, selectedSegment, onSegmentClick, focusBounds, focusKey }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
-  const layers = useRef<{ area: L.LayerGroup; streets: L.LayerGroup; cones: L.LayerGroup } | null>(null);
+  const layers = useRef<{ area: L.LayerGroup; streets: L.LayerGroup; cones: L.LayerGroup; tagging: L.LayerGroup } | null>(null);
   const drawnCb = useRef(onDrawn);
   drawnCb.current = onDrawn;
   const coneCb = useRef(onConeClick);
   coneCb.current = onConeClick;
+  const segmentCb = useRef(onSegmentClick);
+  segmentCb.current = onSegmentClick;
   const [zoom, setZoom] = useState(16);
   const viewCb = useRef(onViewChange);
   viewCb.current = onViewChange;
@@ -86,7 +95,7 @@ export default function MapView({ status, area, streets, cones, drawMode, onDraw
       L.tileLayer(status.basemap.url, { attribution: status.basemap.attribution, maxZoom: 20, maxNativeZoom: 19 }).addTo(m);
     }
     L.geoJSON(status.scope as any, { style: { color: '#22313A', weight: 1, dashArray: '4 6', fill: false, opacity: 0.5 }, interactive: false }).addTo(m);
-    layers.current = { area: L.layerGroup().addTo(m), streets: L.layerGroup().addTo(m), cones: L.layerGroup().addTo(m) };
+    layers.current = { area: L.layerGroup().addTo(m), streets: L.layerGroup().addTo(m), tagging: L.layerGroup().addTo(m), cones: L.layerGroup().addTo(m) };
     m.pm.setGlobalOptions({ snappable: false, templineStyle: { color: '#22313A' }, hintlineStyle: { color: '#22313A', dashArray: '4 4' }, pathOptions: { color: '#22313A', weight: 2 } } as any);
     m.on('pm:create', (e: any) => {
       const geometry = e.layer.toGeoJSON().geometry as Geo;
@@ -145,6 +154,22 @@ export default function MapView({ status, area, streets, cones, drawMode, onDraw
     }
   }, [streets]);
 
+  useEffect(() => {
+    const g = layers.current?.tagging;
+    if (!g) return;
+    g.clearLayers();
+    for (const f of taggingSegments?.features ?? []) {
+      const p = f.properties;
+      const selected = p.segment_key === selectedSegment;
+      const line = L.geoJSON(f as any, { style: { color: TAG_COLORS[p.status] ?? TAG_COLORS.unlabelled, weight: selected ? 9 : 5, opacity: selected ? 1 : 0.82, dashArray: p.status === 'queued' ? '6 5' : undefined } });
+      const tip = document.createElement('span');
+      tip.textContent = `${p.street || 'Unnamed street'} · ${p.completed ?? 0}/${p.eligible ?? 0} tagged${p.needs_review ? ` · ${p.needs_review} need review` : ''}`;
+      line.bindTooltip(tip, { sticky: true });
+      line.on('click', () => segmentCb.current?.(p.segment_key));
+      line.addTo(g);
+    }
+  }, [taggingSegments, selectedSegment]);
+
   // view cones
   useEffect(() => {
     const g = layers.current?.cones;
@@ -174,6 +199,12 @@ export default function MapView({ status, area, streets, cones, drawMode, onDraw
     for (const c of cones) bounds.extend([c.lat, c.lng]);
     if (bounds.isValid()) m.fitBounds(bounds, { padding: [48, 48], maxZoom: 18 });
   }, [fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!map.current || !focusBounds) return;
+    const [west, south, east, north] = focusBounds;
+    map.current.fitBounds([[south, west], [north, east]], { padding: [60, 60], maxZoom: 18 });
+  }, [focusKey]); // Deliberately refit only on an explicit focus action, never a progress poll.
 
   return <div ref={el} className="map" aria-label="Map" />;
 }
