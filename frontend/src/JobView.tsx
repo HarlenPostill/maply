@@ -5,6 +5,7 @@ import { aggregateSegments, TaggingPanel, TagLegend, TagResults, tagStatus, word
 import { ImageRegions } from './ImageRegions';
 import { ActivityPeek, TaggingActivity, useTaggingActivity } from './TaggingActivity';
 import { confidencePercent } from './Confidence';
+import ParallelSessions, { useParallelSessions } from './ParallelSessions';
 import type { MapState } from './App';
 import { ago, bytes, flagWords, STATUS_WORDS } from './words';
 
@@ -60,6 +61,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
   const [mapMode, setMapMode] = useState<'capture' | 'tagging'>('tagging');
   const activity = useTaggingActivity(id);
   const [tagging, setTagging] = useState<TaggingSummary | null>(null);
+  const parallelSessions = useParallelSessions(activity.snapshot?.settings ?? tagging?.settings);
   const [tagSegments, setTagSegments] = useState<FC | null>(null);
   const rawTagSegments = useRef<FC | null>(null);
   const [mapFocus, setMapFocus] = useState<{ bounds: [number, number, number, number]; key: number } | null>(null);
@@ -204,7 +206,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
         {stage === 'map' && <div className="map-mode seg" role="group" aria-label="Map layer"><button aria-pressed={mapMode === 'tagging'} onClick={() => setMapMode('tagging')}>Tagging progress</button><button aria-pressed={mapMode === 'capture'} onClick={() => setMapMode('capture')}>Capture</button></div>}
         {stage === 'map' && tooFar && <p className="stage-hint">{mapMode === 'tagging' ? 'Click a street section · zoom in for images' : 'Zoom in to see each photo'}</p>}
         {stage === 'map' && mapMode === 'tagging' && <TagLegend />}
-        {stage === 'activity' && <TaggingActivity jobId={id} snapshot={activity.snapshot} summary={tagging} error={activity.error} connection={activity.connection} busy={!!busy} onOpen={openActivityPhoto} onCancel={cancelTagging} onRefresh={() => { activity.refresh(); loadTagging(); }} onChooseWork={() => document.querySelector('.tag-scope')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} />}
+        {stage === 'activity' && <TaggingActivity jobId={id} snapshot={activity.snapshot} summary={tagging} error={activity.error} connection={activity.connection} busy={!!busy} onOpen={openActivityPhoto} onCancel={cancelTagging} onRefresh={() => { activity.refresh(); loadTagging(); }} onChooseWork={() => document.querySelector('.tag-scope')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} parallelSessions={parallelSessions} />}
         {stage === 'photos' && (
           <section className="photos" aria-label="Photos">
             <label className="photo-tag-filter field"><span>Tagging status</span><select aria-label="Filter photos by tagging status" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}><option value="all">All images</option><option value="unlabelled">Not tagged</option><option value="queued">Queued</option><option value="running">Running</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></label>
@@ -240,7 +242,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
         {selected && <ShotDetail key={selected.id} shot={selected} onClose={() => setSelected(null)} onReview={review} busy={!!busy} onTag={() => queueTagging({ shot_ids: [selected.id], retry: true })} />}
       </>,
     );
-  }, [job, stage, filter, page, selected, tooFar, mapMode, busy, tagFilter, activity.snapshot, activity.error, activity.connection, tagging]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [job, stage, filter, page, selected, tooFar, mapMode, busy, tagFilter, activity.snapshot, activity.error, activity.connection, tagging, parallelSessions.settings, parallelSessions.draft, parallelSessions.pending, parallelSessions.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => setOverlay(null), [setOverlay]);
 
@@ -352,7 +354,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
         </p>
       </div>
 
-      <TaggingPanel jobId={id} summary={tagging} error={tagError} loading={tagLoading} busy={!!busy} selectedSegment={selectedSegment} segments={tagSegments} onSelectSegment={setSelectedSegment} onQueue={queueTagging} onCancel={cancelTagging} onPhoto={setSelected} onRefresh={loadTagging} onFocusMap={focusSelection} activity={<ActivityPeek snapshot={activity.snapshot} onOpen={() => setStage('activity')} />} />
+      <TaggingPanel jobId={id} summary={tagging} error={tagError} loading={tagLoading} busy={!!busy} selectedSegment={selectedSegment} segments={tagSegments} onSelectSegment={setSelectedSegment} onQueue={queueTagging} onCancel={cancelTagging} onPhoto={setSelected} onRefresh={loadTagging} onFocusMap={focusSelection} activity={<><ParallelSessions state={parallelSessions} /><ActivityPeek snapshot={activity.snapshot} onOpen={() => setStage('activity')} /></>} />
       {note && <p className="ok" role="status">{note}</p>}
       {error && <p className="error" role="alert">{error}</p>}
 

@@ -59,6 +59,11 @@ export function TaggingPanel({ jobId, summary, error, loading, busy, selectedSeg
   const scope: TagSelector = { ...(selectedSegment ? { segment_keys: [selectedSegment] } : { streets }), ...(side === 'both' ? {} : { side }) };
   const hasSelection = !!selectedSegment || streets.length > 0;
   const version = JSON.stringify(summary?.counts);
+  const visibleStreets = (summary?.streets ?? [])
+    .filter((s) => s.street.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => (b.eligible - b.completed) - (a.eligible - a.completed)
+      || Number(b.eligible > 0) - Number(a.eligible > 0)
+      || a.street.localeCompare(b.street));
 
   useEffect(() => {
     if (!selectedSegment) { setPhotos({ total: 0, items: [] }); return; }
@@ -94,9 +99,10 @@ export function TaggingPanel({ jobId, summary, error, loading, busy, selectedSeg
           <p className="fineprint">{segment?.properties.completed ?? 0} of {eligible} saved images tagged (all sides). Click another section on the map to change selection.</p>
         </> : <>
           <label className="field"><span>Choose streets, or click a section on the map</span><input type="search" aria-label="Find streets for tagging" placeholder="Find a street…" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+          <p className="fineprint">Most saved images awaiting tags first. Streets without saved images appear last.</p>
           <ul className="tag-streets checklist checklist-scroll">
-            {summary.streets.filter((s) => s.street.toLowerCase().includes(query.toLowerCase())).map((s) => <li key={s.street}>
-              <label><input type="checkbox" checked={streets.includes(s.street)} onChange={(e) => setStreets((prev) => e.target.checked ? [...prev, s.street] : prev.filter((name) => name !== s.street))} /><span className="street-score-name">{s.street || 'Unnamed street'}<small>{s.completed}/{s.eligible} images tagged{s.confidence ? ` · ${s.confidence.known} known · ${s.confidence.unknown} unknown observations` : ''}</small></span><small className="street-confidence" title="Mean of tagged image scores; not measured accuracy">{confidencePercent(s.confidence?.mean)}</small></label>
+            {visibleStreets.map((s) => <li key={s.street}>
+              <label><input type="checkbox" checked={streets.includes(s.street)} onChange={(e) => setStreets((prev) => e.target.checked ? [...prev, s.street] : prev.filter((name) => name !== s.street))} /><span className="street-score-name">{s.street || 'Unnamed street'}<small>{s.eligible ? `${s.completed}/${s.eligible} images tagged` : 'No saved images'}{s.confidence && s.completed > 0 ? ` · ${s.confidence.known} known · ${s.confidence.unknown} unknown observations` : ''}</small></span><small className="street-confidence" title="Mean of tagged image scores; not measured accuracy">{confidencePercent(s.confidence?.mean)}</small></label>
             </li>)}
           </ul>
           <p className="fineprint">Street scores show mean model confidence for tagged images. Untagged images and unknown observations do not raise the score.</p>

@@ -97,6 +97,7 @@ export type AccessibilityLabels = {
 export type TagCounts = { eligible: number; unlabelled: number; queued: number; running: number; completed: number; failed: number; needs_review: number; cancelled: number };
 export type ConfidenceSummary = { mean: number | null; minimum: number | null; known: number; unknown: number; images?: number };
 export type TaggingSummary = {
+  settings?: TaggingSettings;
   counts: TagCounts;
   confidence?: ConfidenceSummary | null;
   streets: (TagCounts & { street: string; confidence?: ConfidenceSummary | null })[];
@@ -112,7 +113,8 @@ export type ActivityItem = {
   confidence: ConfidenceSummary | null; queue_position?: number | null;
 };
 export type UsageSnapshot = { status: 'available' | 'unavailable'; fetched_at: string; source: string; groups: { name: string; buckets: { id: string; name: string; window: string; remaining_fraction: number | null; reset_time?: string | null }[] }[]; error?: string };
-export type ActivitySnapshot = { items: ActivityItem[]; counts: TagCounts; usage: UsageSnapshot | null; total: number };
+export type TaggingSettings = { parallel_sessions: number; max_parallel_sessions: number; running: number };
+export type ActivitySnapshot = { items: ActivityItem[]; counts: TagCounts; usage: UsageSnapshot | null; total: number; settings?: TaggingSettings };
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {

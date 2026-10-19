@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -132,3 +132,10 @@ class TagTaskEvent(Base):
     message: Mapped[str] = mapped_column(String(500), nullable=False)
     data: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TagSettings(Base):
+    __tablename__ = 'tag_settings'
+    __table_args__ = (CheckConstraint('id = 1'), CheckConstraint('parallel_sessions BETWEEN 1 AND 8'))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    parallel_sessions: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db, session_scope
-from app.models import Job, Segment, Shot, TagTask, TagWorker, TagTaskEvent
+from app.models import Job, Segment, Shot, TagTask, TagWorker, TagTaskEvent, TagSettings
 from app.tag_schema import LabelResult, SCHEMA_VERSION, build_prompt, cli_json_schema, review_reasons
 from app.confidence import confidence_for_labels, aggregate_confidence
 
@@ -34,10 +34,48 @@ router = APIRouter(prefix='/api')
 MODEL = 'gemini-3.8-flash-low'
 ELIGIBLE = ('captured', 'accepted', 'needs_check')
 LEASE_SECONDS = 300
+MAX_PARALLEL_SESSIONS = 20
 
 
 def now():
     return datetime.now(timezone.utc)
+
+
+def settings_row(s, lock=False):
+    if s.get(TagSettings, 1) is None:
+        s.execute(insert(TagSettings).values(id=1, parallel_sessions=1).on_conflict_do_nothing(index_elements=[TagSettings.id]))
+    query = select(TagSettings).where(TagSettings.id == 1).execution_options(populate_existing=True)
+    return s.scalar(query.with_for_update() if lock else query)
+
+
+def active_sessions(s):
+    return s.scalar(select(func.count()).select_from(TagTask).where(TagTask.status == 'running', TagTask.lease_until > now()))
+
+
+def settings_dict(s):
+    return {'parallel_sessions': settings_row(s).parallel_sessions,
+            'max_parallel_sessions': MAX_PARALLEL_SESSIONS, 'running': active_sessions(s)}
+
+
+class ParallelSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    parallel_sessions: int = Field(strict=True, ge=1, le=MAX_PARALLEL_SESSIONS)
+
+
+@router.get('/tagging/settings')
+def read_settings(s: Session = Depends(get_db)):
+    value = settings_dict(s)
+    s.commit()
+    return value
+
+
+@router.patch('/tagging/settings')
+def write_settings(req: ParallelSettingsRequest, s: Session = Depends(get_db)):
+    settings_row(s, lock=True).parallel_sessions = req.parallel_sessions
+    s.flush()
+    value = settings_dict(s)
+    s.commit()
+    return value
 
 
 def eligible():
@@ -223,7 +261,7 @@ def summary(jid: uuid.UUID, s: Session = Depends(get_db)):
         metrics[street].append(confidence)
     s.commit()
     return {'counts': c, 'streets': [{'street': street, **v, 'confidence': aggregate_confidence(metrics[street])} for street, v in sorted(streets.items())],
-            'confidence': aggregate_confidence([m for values in metrics.values() for m in values]), 'worker': worker_status(s), 'model': MODEL}
+            'confidence': aggregate_confidence([m for values in metrics.values() for m in values]), 'worker': worker_status(s), 'model': MODEL, 'settings': settings_dict(s)}
 
 
 def activity_snapshot(s, jid, status=None, limit=50, offset=0):
@@ -258,7 +296,7 @@ def activity_snapshot(s, jid, status=None, limit=50, offset=0):
               'confidence': t.confidence if t.status == 'completed' else None}
              for t, code, street, side in rows]
     s.commit()
-    return {'items': items, 'total': total, 'counts': counts, 'usage': usage}
+    return {'items': items, 'total': total, 'counts': counts, 'usage': usage, 'settings': settings_dict(s)}
 
 
 @router.get('/jobs/{jid}/tagging/activity')
@@ -415,12 +453,18 @@ def heartbeat(req: WorkerRequest, s: Session = Depends(get_db)):
 @worker_router.post('/claim')
 def claim(req: WorkerRequest, s: Session = Depends(get_db)):
     touch_worker(s, req)
+    # Serialize slot allocation across every job and worker process. The row lock
+    # remains held until the claimed task is committed as running.
+    settings = settings_row(s, lock=True)
     recover(s)
+    if active_sessions(s) >= settings.parallel_sessions:
+        s.commit()
+        return {'task': None, 'reason': 'capacity'}
     t = s.execute(select(TagTask).where(TagTask.status == 'queued', TagTask.model == req.model).order_by(
         TagTask.updated_at, TagTask.id).with_for_update(skip_locked=True).limit(1)).scalar_one_or_none()
     if not t:
         s.commit()
-        return {'task': None}
+        return {'task': None, 'reason': 'empty'}
     sh = s.get(Shot, t.shot_id)
     j = s.get(Job, sh.job_id)
     try:

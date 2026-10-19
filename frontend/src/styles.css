@@ -371,3 +371,14 @@ input:focus { border-color: var(--ink); outline: none; }
   .queue-list .task-actions { margin-left: 32px; }
 }
 @media (prefers-reduced-motion: reduce) { .feature-region { transition: none; } }
+
+/* ---------- shared session limit ---------- */
+.parallel-sessions { display: grid; gap: .65rem; padding: .9rem; border: 1px solid var(--line); background: var(--paper); border-radius: 9px; }
+.parallel-sessions h3 { font-size: .95rem; }
+.parallel-sessions .tag-heading { flex-wrap: wrap; }
+.parallel-controls { display: flex; gap: .5rem; }
+.parallel-controls select { min-width: 0; flex: 1; border: 1px solid var(--line); border-radius: 7px; padding: .5rem .6rem; background: var(--paper); font-size: var(--t-s); }
+.parallel-controls .btn { font-size: var(--t-s); }
+.parallel-effective { font-size: .75rem; color: var(--muted); }
+.parallel-sessions > .fineprint { font-size: .7rem; }
+.parallel-error { display: grid; gap: .3rem; font-size: var(--t-s); }

@@ -51,6 +51,9 @@ def api():
 
     configure_engine(database_url)
     with TestClient(app, base_url="http://127.0.0.1") as client:
+        assert client.get("/api/tagging/settings").json() == {
+            "parallel_sessions": 1, "max_parallel_sessions": 20, "running": 0,
+        }
         yield client
 
 
@@ -64,6 +67,9 @@ def client(api):
     with session_scope() as session:
         session.execute(delete(TagTask))
         session.execute(delete(TagWorker))
+    # Existing queue/lease contracts are independent of the newly configurable cap.
+    response = api.patch("/api/tagging/settings", json={"parallel_sessions": 8})
+    assert response.status_code == 200, response.text
     return api
 
 
@@ -618,3 +624,138 @@ def test_image_missing_at_claim_produces_terminal_failure_event(client, job):
     item = activity(client, current)["items"][0]
     assert item["status"] == "failed" and "Image missing" in item["error"]
     assert item["events"][-1]["kind"] == "failed"
+
+
+def test_parallel_settings_validate_bounds_and_persist(client):
+    response = client.patch("/api/tagging/settings", json={"parallel_sessions": 1})
+    assert response.status_code == 200
+    assert response.json() == {"parallel_sessions": 1, "max_parallel_sessions": 20, "running": 0}
+    assert client.get("/api/tagging/settings").json() == response.json()
+    for value in [0, 9, -1, 1.5, "2", True, None]:
+        invalid = client.patch("/api/tagging/settings", json={"parallel_sessions": value})
+        assert invalid.status_code == 422, invalid.text
+    assert client.patch("/api/tagging/settings", json={}).status_code == 422
+    assert client.patch("/api/tagging/settings", json={"parallel_sessions": 2, "unsupported": True}).status_code == 422
+    assert client.get("/api/tagging/settings").json()["parallel_sessions"] == 1
+    assert client.patch("/api/tagging/settings", json={"parallel_sessions": 8}).status_code == 200
+    assert client.get("/api/tagging/settings").json()["parallel_sessions"] == 8
+
+
+@pytest.mark.parametrize("capacity", [1, 3, 8])
+def test_concurrent_claims_enforce_global_cap_without_duplicate_leases(client, job, capacity):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+    from app.db import session_scope
+    from app.main import app
+    from app.models import TagTask
+    from app.tagging import MODEL
+
+    current, _, saved = job
+    other = client.post("/api/jobs", json={
+        "name": f"Concurrent second job {capacity}", "streets": STREETS, "options": {"spacing_m": 30},
+    }).json()
+    other_shots = client.get(f"/api/jobs/{other['id']}/shots?limit=2").json()["items"]
+    for shot in other_shots:
+        capture(client, shot)
+    assert queue(client, other, {"shot_ids": [s["id"] for s in other_shots]}).json()["queued"] == 2
+    assert queue(client, current, {"shot_ids": [s["id"] for s in saved]}).json()["queued"] == len(saved)
+    assert client.patch("/api/tagging/settings", json={"parallel_sessions": capacity}).status_code == 200
+    barrier = Barrier(10)
+
+    def attempt(worker_number):
+        # Separate clients give every contender an independent ASGI request/session.
+        with TestClient(app, base_url="http://127.0.0.1") as contender:
+            barrier.wait(timeout=10)
+            response = contender.post(f"{WORKER}/claim", headers=WORKER_HEADERS, json={
+                "worker_id": f"concurrent-{worker_number}", "model": MODEL,
+            })
+            assert response.status_code == 200, response.text
+            return response.json()
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        responses = list(executor.map(attempt, range(10)))
+    tasks = [r["task"] for r in responses if r["task"] is not None]
+    blocked = [r for r in responses if r["task"] is None]
+    assert len(tasks) == capacity
+    assert len({t["id"] for t in tasks}) == capacity
+    assert len({t["shot_id"] for t in tasks}) == capacity
+    assert len({t["lease_token"] for t in tasks}) == capacity
+    assert len(blocked) == 10 - capacity and all(r["reason"] == "capacity" for r in blocked)
+    assert any(t["shot_id"] in {s["id"] for s in other_shots} for t in tasks)
+    if capacity > 2:
+        assert any(t["shot_id"] in {s["id"] for s in saved} for t in tasks)
+    assert client.get("/api/tagging/settings").json() == {
+        "parallel_sessions": capacity, "max_parallel_sessions": 20, "running": capacity,
+    }
+    with session_scope() as session:
+        records = session.scalars(select(TagTask)).all()
+        assert sum(t.status == "running" for t in records) == capacity
+        assert all(t.attempts == (1 if t.status == "running" else 0) for t in records)
+        assert all(t.lease_token is None for t in records if t.status == "queued")
+
+
+def test_parallel_limit_increases_immediately_and_reductions_drain_without_cancelling(client, job):
+    current, _, saved = job
+    assert queue(client, current, {"shot_ids": [s["id"] for s in saved[:4]]}).json()["queued"] == 4
+    client.patch("/api/tagging/settings", json={"parallel_sessions": 1})
+    first = claim(client)
+    denied = client.post(f"{WORKER}/claim", headers=WORKER_HEADERS, json={"worker_id": "idle-worker"}).json()
+    assert denied == {"task": None, "reason": "capacity"}
+    increased = client.patch("/api/tagging/settings", json={"parallel_sessions": 3}).json()
+    assert increased["running"] == 1
+    second, third = claim(client), claim(client)
+    assert second is not None and third is not None
+    reduced = client.patch("/api/tagging/settings", json={"parallel_sessions": 1}).json()
+    assert reduced == {"parallel_sessions": 1, "max_parallel_sessions": 20, "running": 3}
+    assert claim(client) is None
+    assert complete(client, first).status_code == 200
+    assert client.get("/api/tagging/settings").json()["running"] == 2
+    assert claim(client) is None
+    assert complete(client, second).status_code == 200
+    assert client.get("/api/tagging/settings").json()["running"] == 1
+    assert claim(client) is None
+    assert complete(client, third).status_code == 200
+    fourth = claim(client)
+    assert fourth is not None
+    assert client.get("/api/tagging/settings").json()["running"] == 1
+
+
+def test_parallel_limit_is_shared_across_models(client, job):
+    from sqlalchemy import select
+    from app.db import session_scope
+    from app.models import TagTask
+
+    current, _, saved = job
+    queue(client, current, {"shot_ids": [s["id"] for s in saved[:2]]})
+    with session_scope() as session:
+        task = session.scalar(select(TagTask).where(TagTask.shot_id == uuid.UUID(saved[1]["id"])))
+        task.model = "other-vision-model"
+    client.patch("/api/tagging/settings", json={"parallel_sessions": 1})
+    assert claim(client) is not None
+    payload = {"worker_id": "other-model-worker", "model": "other-vision-model"}
+    blocked = client.post(f"{WORKER}/claim", headers=WORKER_HEADERS, json=payload)
+    assert blocked.json() == {"task": None, "reason": "capacity"}
+    client.patch("/api/tagging/settings", json={"parallel_sessions": 2})
+    allowed = client.post(f"{WORKER}/claim", headers=WORKER_HEADERS, json=payload).json()["task"]
+    assert allowed["model"] == "other-vision-model" and allowed["shot_id"] == saved[1]["id"]
+    assert client.get("/api/tagging/settings").json()["running"] == 2
+
+
+def test_expired_lease_releases_global_capacity(client, job):
+    from app.db import session_scope
+    from app.models import TagTask
+
+    current, _, saved = job
+    queue(client, current, {"shot_ids": [s["id"] for s in saved[:2]]})
+    client.patch("/api/tagging/settings", json={"parallel_sessions": 1})
+    expired = claim(client)
+    with session_scope() as session:
+        session.get(TagTask, uuid.UUID(expired["id"])).lease_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    next_task = claim(client)
+    assert next_task is not None and next_task["id"] != expired["id"]
+    assert client.get("/api/tagging/settings").json()["running"] == 1
+    assert complete(client, expired).status_code == 409
+    assert complete(client, next_task).status_code == 200

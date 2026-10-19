@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -362,3 +363,207 @@ def test_correction_events_carry_attempt_and_stages(monkeypatch, tmp_path):
                                 lease_lost=threading.Event(), on_event=events.append)
     assert {e["data"]["attempt"] for e in events if e["kind"] == "usage"} == {1, 2}
     assert any(e["data"].get("stage") == "correction" for e in events)
+
+
+def _pool_components(limit, execute):
+    created, closed = [], []
+    coordinator = SimpleNamespace(api_url="http://127.0.0.1:8000", model="model", binary=None, timeout=120,
+                                  parallel_sessions=limit, heartbeat=lambda: None)
+
+    class Lane:
+        def __init__(self, api_url, model, **kwargs):
+            assert kwargs["fetch_usage"] is False
+            assert kwargs["usage_source"] is coordinator
+            self.failed_tasks = 0
+            self.last_claim_reason = None
+            self.worker_id = len(created)
+            self.client = SimpleNamespace(close=lambda: closed.append(self.worker_id))
+            created.append(self)
+
+        def run_one(self):
+            return execute(self)
+
+    return coordinator, Lane, created, closed
+
+
+@pytest.mark.parametrize("budget", [1, 2])
+def test_pool_reserves_global_budget_and_never_duplicates_a_lane(budget):
+    module = _worker_module()
+    lock, barrier = threading.Lock(), threading.Barrier(budget)
+    calls, active_ids = [], set()
+    peak = 0
+
+    def execute(worker):
+        nonlocal peak
+        with lock:
+            assert worker.worker_id not in active_ids
+            active_ids.add(worker.worker_id)
+            calls.append(worker.worker_id)
+            peak = max(peak, len(active_ids))
+        barrier.wait(timeout=2)
+        time.sleep(0.01)
+        with lock:
+            active_ids.remove(worker.worker_id)
+        return True
+
+    coordinator, factory, created, closed = _pool_components(lambda: 8, execute)
+    assert module.run_pool(coordinator, max_tasks=budget, poll=0.01, worker_factory=factory) == 0
+    assert len(calls) == budget and peak == budget
+    assert len(created) == budget and sorted(closed) == list(range(budget))
+
+
+def test_pool_reacts_to_cap_changes_and_drains_without_new_claims():
+    module = _worker_module()
+    condition = threading.Condition()
+    stop, lowered_observed = threading.Event(), threading.Event()
+    state = {"limit": 1, "active": 0}
+    starts, releases = [], []
+
+    def limit():
+        with condition:
+            if state["limit"] == 1 and len(starts) >= 3:
+                lowered_observed.set()
+            return state["limit"]
+
+    def execute(worker):
+        release = threading.Event()
+        with condition:
+            starts.append(worker.worker_id)
+            releases.append(release)
+            state["active"] += 1
+            condition.notify_all()
+        assert release.wait(3)
+        with condition:
+            state["active"] -= 1
+            condition.notify_all()
+        return True
+
+    coordinator, factory, created, closed = _pool_components(limit, execute)
+    result = []
+    manager = threading.Thread(target=lambda: result.append(module.run_pool(
+        coordinator, poll=0.01, worker_factory=factory, stop_event=stop)))
+    manager.start()
+    try:
+        with condition:
+            assert condition.wait_for(lambda: len(starts) == 1, timeout=2)
+            assert state["active"] == 1
+            state["limit"] = 3
+            assert condition.wait_for(lambda: len(starts) == 3, timeout=2)
+            assert state["active"] == 3
+            state["limit"] = 1
+        assert lowered_observed.wait(2)
+        assert len(starts) == 3  # reducing the cap did not cancel those tasks
+        for release in releases[:3]:
+            release.set()
+        with condition:
+            assert condition.wait_for(lambda: len(starts) == 4, timeout=2)
+            assert state["active"] == 1
+        stop.set()
+        time.sleep(0.04)
+        assert manager.is_alive() and len(starts) == 4
+        releases[3].set()
+        manager.join(timeout=2)
+        assert not manager.is_alive() and result == [0]
+        assert len(created) == 3 and len(closed) == 3
+    finally:
+        stop.set()
+        for release in releases:
+            release.set()
+        manager.join(timeout=3)
+
+
+def test_pool_capacity_denial_does_not_count_as_empty_or_spend_budget():
+    module = _worker_module()
+    calls = []
+    def execute(worker):
+        calls.append(True)
+        if len(calls) == 1:
+            worker.last_claim_reason = "capacity"
+            return False
+        if len(calls) == 2:
+            worker.last_claim_reason = None
+            return True
+        worker.last_claim_reason = "empty"
+        return False
+    coordinator, factory, _, _ = _pool_components(lambda: 1, execute)
+    assert module.run_pool(coordinator, max_tasks=2, poll=0.01, worker_factory=factory) == 0
+    assert len(calls) == 3
+
+
+def test_pool_isolates_one_session_error_and_finishes_its_peer():
+    module = _worker_module()
+    barrier = threading.Barrier(2)
+    completed = []
+    def execute(worker):
+        barrier.wait(timeout=2)
+        if worker.worker_id == 0:
+            raise RuntimeError("One session failed")
+        time.sleep(0.03)
+        completed.append(worker.worker_id)
+        return True
+    coordinator, factory, created, closed = _pool_components(lambda: 2, execute)
+    assert module.run_pool(coordinator, max_tasks=2, poll=0.01, worker_factory=factory) == 1
+    assert completed == [1] and len(created) == 2 and sorted(closed) == [0, 1]
+
+
+def test_pool_keyboard_interrupt_drains_leased_work():
+    module = _worker_module()
+    started, interrupted, release = threading.Event(), threading.Event(), threading.Event()
+    def limit():
+        if started.is_set():
+            interrupted.set()
+            raise KeyboardInterrupt()
+        return 1
+    def execute(worker):
+        started.set()
+        assert release.wait(3)
+        return True
+    coordinator, factory, _, _ = _pool_components(limit, execute)
+    results = []
+    manager = threading.Thread(target=lambda: results.append(module.run_pool(coordinator, poll=0.01, worker_factory=factory)))
+    manager.start()
+    try:
+        assert interrupted.wait(2)
+        assert manager.is_alive()
+        release.set()
+        manager.join(timeout=2)
+        assert results == [0] and not manager.is_alive()
+    finally:
+        release.set()
+        manager.join(timeout=3)
+
+
+def test_pool_children_share_one_quota_fetcher(monkeypatch):
+    module = _worker_module()
+    calls = []
+    snapshot = {"status": "available", "groups": []}
+    monkeypatch.setattr(module, "usage_snapshot", lambda binary: calls.append(binary) or snapshot)
+    coordinator = module.Worker("http://127.0.0.1:8000", "model")
+    children = [module.Worker(coordinator.api_url, "model", fetch_usage=False, usage_source=coordinator) for _ in range(3)]
+    payloads = []
+    for worker in [coordinator, *children]:
+        monkeypatch.setattr(worker, "post", lambda path, payload: payloads.append(payload) or {"ok": True})
+    try:
+        coordinator.heartbeat()
+        coordinator._usage_thread.join(timeout=2)
+        for child in children:
+            child.heartbeat()
+        assert len(calls) == 1
+        assert all(payload["usage"] == snapshot for payload in payloads[-3:])
+        assert len({child.worker_id for child in children}) == 3
+        assert len({id(child.client) for child in children}) == 3
+    finally:
+        for worker in [coordinator, *children]:
+            worker.client.close()
+
+
+def test_cli_once_overrides_pool_budget_and_preflights_once(monkeypatch):
+    module = _worker_module()
+    catalog_calls, limits = [], []
+    worker = SimpleNamespace(model="model", client=SimpleNamespace(close=lambda: None))
+    monkeypatch.setattr(module, "Worker", lambda *args, **kwargs: worker)
+    monkeypatch.setattr(module, "available_models", lambda binary: catalog_calls.append(True) or {"model"})
+    monkeypatch.setattr(module, "run_pool", lambda coordinator, **kwargs: limits.append(kwargs["max_tasks"]) or 0)
+    monkeypatch.setattr(sys, "argv", ["tag_worker.py", "--model", "model", "--once", "--max-tasks", "8"])
+    assert module.main() == 0
+    assert limits == [1] and len(catalog_calls) == 1

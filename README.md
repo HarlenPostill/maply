@@ -117,12 +117,26 @@ The default is `gemini-3.8-flash-low`, tested with the signed-in CLI on existing
 job images. It uses structured JSON output with strict server validation.
 
 The Docker app keeps a persistent queue in Postgres. The host worker downloads
-one selected image at a time from your local app, calls Antigravity in read-only
-plan mode, and saves validated structured results back to Maply. Credentials stay
+selected images from your local app into independent session workspaces, calls
+Antigravity in read-only plan mode, and saves validated structured results back to Maply. Credentials stay
 with Antigravity on your Mac. Leave the worker terminal running while tagging.
 Use `--api-url http://127.0.0.1:8001` if you changed the app port;
 `--agy-bin /path/to/agy` (or `MAPLY_AGY_BIN`) overrides executable discovery.
 `--once` processes at most one image; `--max-tasks 2` runs a bounded pilot.
+
+Choose **Parallel sessions** in the tagging sidebar or **Activity** panel and
+press **Apply** to run 1–8 images at once. The default is 1. This setting persists
+and applies across all jobs and worker processes. The running manager notices
+changes within a few seconds; increasing it starts more queued work, while
+reducing it lets existing sessions finish before starting more. Postgres enforces
+the cap atomically, so competing sessions cannot claim the same image or exceed
+the selected limit. Eight is Maply's current application limit, not a claimed
+Antigravity account entitlement. Sessions share your account allowance.
+
+One manager performs model discovery and quota refresh for all its sessions.
+`--max-tasks` limits the total number of images across those sessions, while
+`--once` always processes at most one. Stopping the manager with Ctrl+C stops new
+claims and lets active sessions save their results before exiting.
 
 In a job:
 

@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from pathlib import Path
 import socket
+import signal
 import sys
 import tempfile
 import threading
@@ -74,7 +76,8 @@ def validated_annotation(path: Path, task: dict, *, binary: str | None, timeout:
 
 
 class Worker:
-    def __init__(self, api_url: str, model: str, *, binary: str | None = None, timeout: int = 120):
+    def __init__(self, api_url: str, model: str, *, binary: str | None = None, timeout: int = 120,
+                 fetch_usage: bool = True, usage_source: Worker | None = None):
         parsed = urlparse(api_url)
         if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError("The tagging worker requires a local Maply API URL (localhost/127.0.0.1).")
@@ -83,6 +86,9 @@ class Worker:
         self.api_url = api_url.rstrip("/")
         self.model, self.binary, self.timeout = model, binary, timeout
         self.failed_tasks = 0
+        self.last_claim_reason = None
+        self.fetch_usage = fetch_usage
+        self.usage_source = usage_source
         self.worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:10]}"
         self.client = httpx.Client(base_url=self.api_url, timeout=30, headers={"X-Maply": "tagging-worker"}, follow_redirects=False)
         self._usage = None
@@ -97,8 +103,9 @@ class Worker:
 
     def heartbeat(self, error: str | None = None) -> None:
         self.refresh_usage()
-        with self._usage_lock:
-            usage = self._usage
+        source = self.usage_source or self
+        with source._usage_lock:
+            usage = source._usage
         payload = {"worker_id": self.worker_id, "model": self.model, "error": error}
         if usage is not None:
             payload["usage"] = usage
@@ -106,6 +113,8 @@ class Worker:
 
     def refresh_usage(self) -> None:
         """Limit discovery runs independently of inference and lease renewal."""
+        if not self.fetch_usage:
+            return
         with self._usage_lock:
             if time.monotonic() - self._usage_last_requested < 300:
                 return
@@ -121,11 +130,22 @@ class Worker:
             self._usage_thread = threading.Thread(target=fetch, daemon=True, name="maply-usage")
             self._usage_thread.start()
 
+    def parallel_sessions(self) -> int:
+        response = self.client.get("/api/tagging/settings", timeout=5)
+        response.raise_for_status()
+        value = response.json().get("parallel_sessions")
+        if type(value) is not int or not 1 <= value <= 8:
+            raise ValueError("Maply returned an invalid parallel session limit; expected 1–8.")
+        return value
+
     def run_one(self) -> bool:
         self.heartbeat()
-        task = self.post("/api/tagging/worker/claim", {"worker_id": self.worker_id, "model": self.model}).get("task")
+        claim = self.post("/api/tagging/worker/claim", {"worker_id": self.worker_id, "model": self.model})
+        task = claim.get("task")
         if not task:
+            self.last_claim_reason = "capacity" if claim.get("reason") == "capacity" else "empty"
             return False
+        self.last_claim_reason = None
         task_url = f"/api/tagging/worker/tasks/{task['id']}"
         lease = {"worker_id": self.worker_id, "lease_token": task["lease_token"]}
         stop = threading.Event()
@@ -227,13 +247,109 @@ class Worker:
         return True
 
 
+def run_pool(coordinator: Worker, *, poll: float = 3, max_tasks: int | None = None,
+             stop_event: threading.Event | None = None, worker_factory=None) -> int:
+    """Follow the server's live cap while reserving a global bounded task budget.
+
+    Each lane has its own Worker/client/identity. A submitted run_one reserves
+    one budget slot until its claim is known; empty/capacity claims release it.
+    Only the coordinator discovers models/limits. In-flight lanes keep renewing
+    their own leases while the manager drains after a cap reduction or stop.
+    """
+    stop = stop_event if stop_event is not None else threading.Event()
+    factory = worker_factory or Worker
+    executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="maply-tagging")
+    workers = []
+    active = {}
+    processed = failures = 0
+    empty_seen = False
+    next_poll = 0.0
+    previous_limit = None
+    try:
+        while True:
+            try:
+                for future in list(active):
+                    if not future.done():
+                        continue
+                    worker, before_failed = active.pop(future)
+                    try:
+                        found = future.result()
+                        failures += worker.failed_tasks - before_failed
+                        if found:
+                            processed += 1
+                            empty_seen = False
+                        elif worker.last_claim_reason == "empty":
+                            empty_seen = True
+                        else:
+                            # A full server is not an empty queue. Other
+                            # processes may currently own its available slots.
+                            empty_seen = False
+                    except Exception as exc:
+                        # A surprising error can happen after a successful
+                        # claim. Conservatively consume its reserved slot so a
+                        # bounded invocation can never overshoot its budget.
+                        processed += 1
+                        failures += 1
+                        empty_seen = False
+                        print(f"Tagging session failed: {exc.__class__.__name__}; other sessions continue.", file=sys.stderr, flush=True)
+
+                if not active and (stop.is_set() or (max_tasks is not None and (processed >= max_tasks or empty_seen))):
+                    break
+
+                now = time.monotonic()
+                if not stop.is_set() and now >= next_poll and (max_tasks is None or processed + len(active) < max_tasks):
+                    next_poll = now + poll
+                    try:
+                        desired = coordinator.parallel_sessions()
+                        coordinator.heartbeat()
+                    except (httpx.HTTPError, ValueError) as exc:
+                        print(f"Cannot refresh Maply session settings: {exc.__class__.__name__}; existing sessions continue.", file=sys.stderr, flush=True)
+                        next_poll = now + max(poll, 5)
+                        if max_tasks is not None:
+                            failures += 1
+                            stop.set()
+                        desired = 0
+                    if desired and desired != previous_limit:
+                        print(f"Maply parallel session limit: {desired}", flush=True)
+                        previous_limit = desired
+                    slots = max(0, desired - len(active))
+                    if max_tasks is not None:
+                        slots = min(slots, max_tasks - processed - len(active))
+                    busy = {worker for worker, _ in active.values()}
+                    for _ in range(slots):
+                        if stop.is_set():
+                            break
+                        worker = next((candidate for candidate in workers if candidate not in busy), None)
+                        if worker is None:
+                            worker = factory(coordinator.api_url, coordinator.model, binary=coordinator.binary,
+                                             timeout=coordinator.timeout, fetch_usage=False, usage_source=coordinator)
+                            workers.append(worker)
+                        before_failed = worker.failed_tasks
+                        future = executor.submit(worker.run_one)
+                        active[future] = (worker, before_failed)
+                        busy.add(worker)
+                # Poll completed futures without waiting for slower peers;
+                # setting refresh and claim attempts remain limited by poll.
+                time.sleep(min(0.1, poll))
+            except KeyboardInterrupt:
+                stop.set()
+                print(f"Stopping new claims; finishing {len(active)} active tagging session(s).", flush=True)
+    finally:
+        # Never cancel a thread holding a task lease. SIGINT/SIGTERM in main
+        # only sets stop, so each task can save/fail and stop its lease heartbeat.
+        executor.shutdown(wait=True, cancel_futures=False)
+        for worker in workers:
+            worker.client.close()
+    return 1 if failures else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-url", default="http://127.0.0.1:8000")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--agy-bin", help="Antigravity executable (or set MAPLY_AGY_BIN)")
     parser.add_argument("--timeout", type=int, default=120, help="Maximum seconds per model invocation")
-    parser.add_argument("--poll", type=float, default=3, help="Seconds between empty queue checks")
+    parser.add_argument("--poll", type=float, default=3, help="Seconds between session-setting refreshes and queue checks")
     parser.add_argument("--once", action="store_true", help="Process at most one queued image and exit")
     parser.add_argument("--max-tasks", type=int, help="Exit after processing this many tasks, or when the queue is empty")
     args = parser.parse_args()
@@ -244,24 +360,20 @@ def main() -> int:
         models = available_models(args.agy_bin)
         if args.model not in models:
             raise VisionProviderError(f"Model {args.model!r} is not in the signed-in Antigravity catalog.")
-        worker.heartbeat()
-        print(f"Maply tagging worker ready at {args.api_url} ({args.model})", flush=True)
-        processed = 0
-        while True:
-            try:
-                found = worker.run_one()
-            except httpx.HTTPError as exc:
-                print(f"Maply API unavailable: {exc.__class__.__name__}", file=sys.stderr, flush=True)
-                if args.once or args.max_tasks:
-                    return 1
-                time.sleep(max(args.poll, 5))
-                continue
-            if found:
-                processed += 1
-            if args.once or (args.max_tasks and (processed >= args.max_tasks or not found)):
-                return 1 if worker.failed_tasks else 0
-            if not found:
-                time.sleep(args.poll)
+        print(f"Maply tagging manager ready at {args.api_url} ({args.model}); parallel sessions follow web settings", flush=True)
+        stop = threading.Event()
+
+        def stop_gracefully(signum, frame):
+            if not stop.is_set():
+                print("Stopping new claims; active tagging sessions will finish.", flush=True)
+            stop.set()
+
+        previous_handlers = {sig: signal.signal(sig, stop_gracefully) for sig in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            return run_pool(worker, poll=args.poll, max_tasks=1 if args.once else args.max_tasks, stop_event=stop)
+        finally:
+            for sig, handler in previous_handlers.items():
+                signal.signal(sig, handler)
     except VisionProviderError as exc:
         print(str(exc), file=sys.stderr)
         try:
