@@ -98,6 +98,7 @@ class TagTask(Base):
     shot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shots.id", ondelete="CASCADE"), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="antigravity", server_default="antigravity")
     image_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     worker_id: Mapped[str | None] = mapped_column(String(100))
     lease_token: Mapped[str | None] = mapped_column(String(64))
@@ -136,6 +137,6 @@ class TagTaskEvent(Base):
 
 class TagSettings(Base):
     __tablename__ = 'tag_settings'
-    __table_args__ = (CheckConstraint('id = 1'), CheckConstraint('parallel_sessions BETWEEN 1 AND 8'))
+    __table_args__ = (CheckConstraint('id = 1'), CheckConstraint('parallel_sessions BETWEEN 1 AND 20'))
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     parallel_sessions: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

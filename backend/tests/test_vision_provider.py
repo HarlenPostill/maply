@@ -365,6 +365,23 @@ def test_correction_events_carry_attempt_and_stages(monkeypatch, tmp_path):
     assert any(e["data"].get("stage") == "correction" for e in events)
 
 
+@pytest.mark.parametrize("value", [1, 9, 20, 0, 21, True, "20", None])
+def test_worker_parallel_session_bounds(value):
+    module = _worker_module()
+    worker = module.Worker("http://127.0.0.1:8000", "model", fetch_usage=False)
+    worker.client.close()
+    worker.client = httpx.Client(base_url=worker.api_url, transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"parallel_sessions": value})))
+    try:
+        if type(value) is int and 1 <= value <= 20:
+            assert worker.parallel_sessions() == value
+        else:
+            with pytest.raises(ValueError, match="expected 1–20"):
+                worker.parallel_sessions()
+    finally:
+        worker.client.close()
+
+
 def _pool_components(limit, execute):
     created, closed = [], []
     coordinator = SimpleNamespace(api_url="http://127.0.0.1:8000", model="model", binary=None, timeout=120,
@@ -386,7 +403,7 @@ def _pool_components(limit, execute):
     return coordinator, Lane, created, closed
 
 
-@pytest.mark.parametrize("budget", [1, 2])
+@pytest.mark.parametrize("budget", [1, 2, 20])
 def test_pool_reserves_global_budget_and_never_duplicates_a_lane(budget):
     module = _worker_module()
     lock, barrier = threading.Lock(), threading.Barrier(budget)
@@ -406,7 +423,7 @@ def test_pool_reserves_global_budget_and_never_duplicates_a_lane(budget):
             active_ids.remove(worker.worker_id)
         return True
 
-    coordinator, factory, created, closed = _pool_components(lambda: 8, execute)
+    coordinator, factory, created, closed = _pool_components(lambda: 20, execute)
     assert module.run_pool(coordinator, max_tasks=budget, poll=0.01, worker_factory=factory) == 0
     assert len(calls) == budget and peak == budget
     assert len(created) == budget and sorted(closed) == list(range(budget))
@@ -560,7 +577,9 @@ def test_pool_children_share_one_quota_fetcher(monkeypatch):
 def test_cli_once_overrides_pool_budget_and_preflights_once(monkeypatch):
     module = _worker_module()
     catalog_calls, limits = [], []
-    worker = SimpleNamespace(model="model", client=SimpleNamespace(close=lambda: None))
+    worker = SimpleNamespace(model="model", client=SimpleNamespace(
+        close=lambda: None, get=lambda path: httpx.Response(200, request=httpx.Request("GET", "http://localhost" + path),
+            json={"provider": "antigravity", "antigravity_model": "model"})))
     monkeypatch.setattr(module, "Worker", lambda *args, **kwargs: worker)
     monkeypatch.setattr(module, "available_models", lambda binary: catalog_calls.append(True) or {"model"})
     monkeypatch.setattr(module, "run_pool", lambda coordinator, **kwargs: limits.append(kwargs["max_tasks"]) or 0)

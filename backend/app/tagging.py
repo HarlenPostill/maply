@@ -25,6 +25,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.provider_settings import load_settings as provider_settings
 from app.db import get_db, session_scope
 from app.models import Job, Segment, Shot, TagTask, TagWorker, TagTaskEvent, TagSettings
 from app.tag_schema import LabelResult, SCHEMA_VERSION, build_prompt, cli_json_schema, review_reasons
@@ -35,6 +36,11 @@ MODEL = 'gemini-3.8-flash-low'
 ELIGIBLE = ('captured', 'accepted', 'needs_check')
 LEASE_SECONDS = 300
 MAX_PARALLEL_SESSIONS = 20
+
+
+def selected_model():
+    value = provider_settings()
+    return value[value['provider'] + '_model']
 
 
 def now():
@@ -261,7 +267,7 @@ def summary(jid: uuid.UUID, s: Session = Depends(get_db)):
         metrics[street].append(confidence)
     s.commit()
     return {'counts': c, 'streets': [{'street': street, **v, 'confidence': aggregate_confidence(metrics[street])} for street, v in sorted(streets.items())],
-            'confidence': aggregate_confidence([m for values in metrics.values() for m in values]), 'worker': worker_status(s), 'model': MODEL, 'settings': settings_dict(s)}
+            'confidence': aggregate_confidence([m for values in metrics.values() for m in values]), 'worker': worker_status(s), 'model': selected_model(), 'settings': settings_dict(s)}
 
 
 def activity_snapshot(s, jid, status=None, limit=50, offset=0):
@@ -393,6 +399,7 @@ class WorkerRequest(BaseModel):
     model: str = Field(default=MODEL, min_length=1, max_length=100)
     error: str | None = Field(default=None, max_length=4000)
     usage: UsageSnapshot | None = None
+    supports_provider_settings: bool = False
 
 
 class LeaseRequest(BaseModel):
@@ -460,7 +467,14 @@ def claim(req: WorkerRequest, s: Session = Depends(get_db)):
     if active_sessions(s) >= settings.parallel_sessions:
         s.commit()
         return {'task': None, 'reason': 'capacity'}
-    t = s.execute(select(TagTask).where(TagTask.status == 'queued', TagTask.model == req.model).order_by(
+    provider = provider_settings()
+    if provider.get('configured') and not req.supports_provider_settings:
+        s.commit()
+        return {'task': None, 'reason': 'upgrade_worker'}
+    conditions = [TagTask.status == 'queued']
+    if not req.supports_provider_settings:
+        conditions.append(TagTask.model == req.model)
+    t = s.execute(select(TagTask).where(*conditions).order_by(
         TagTask.updated_at, TagTask.id).with_for_update(skip_locked=True).limit(1)).scalar_one_or_none()
     if not t:
         s.commit()
@@ -477,6 +491,9 @@ def claim(req: WorkerRequest, s: Session = Depends(get_db)):
         add_event(s, t, 'failed', t.error)
         s.commit()
         return {'task': None}
+    if req.supports_provider_settings:
+        t.provider = provider['provider']
+        t.model = provider[t.provider + '_model'] if provider.get('configured') else req.model
     t.status, t.worker_id, t.lease_token = 'running', req.worker_id, uuid.uuid4().hex
     t.lease_until, t.updated_at = now() + timedelta(seconds=LEASE_SECONDS), now()
     t.attempts += 1
@@ -490,6 +507,10 @@ def claim(req: WorkerRequest, s: Session = Depends(get_db)):
             'image_url': f'/files/{quote(j.slug)}/{quote(sh.result["file"], safe="/")}?sha={t.image_sha256}',
             'image_sha256': t.image_sha256, 'prompt': build_prompt(metadata),
             'schema': cli_json_schema(), 'model': t.model}
+    if req.supports_provider_settings:
+        task['provider'] = t.provider
+        if t.provider == 'openrouter':
+            task['api_key'] = provider['api_key']
     s.commit()
     return {'task': task}
 
@@ -546,7 +567,7 @@ def complete(tid: uuid.UUID, req: CompleteRequest, s: Session = Depends(get_db))
     if sh.flags:
         labels['review_reasons'].append('Source photo capture flags: ' + ', '.join(sh.flags))
     labels['provenance'] = {'task_id': str(t.id), 'attempt': t.attempts, 'image_sha256': t.image_sha256,
-                            'model': req.model, 'provider': 'antigravity-cli', 'schema_version': SCHEMA_VERSION,
+                            'model': req.model, 'provider': 'openrouter' if t.provider == 'openrouter' else 'antigravity-cli', 'schema_version': SCHEMA_VERSION,
                             'tagged_at': now().isoformat(), 'imagery_date': sh.result.get('image_date_iso'),
                             'shot_id': str(sh.id), 'segment_key': sh.segment_key, 'side': sh.side,
                             'confidence_kind': 'model_reported_uncalibrated'}

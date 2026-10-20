@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, type Geo, type JobSummary, type Status, type FC } from './api';
 import MapView, { type Cone, type DrawMode } from './MapView';
 import NewJob from './NewJob';
+import ModelSettings from './ModelSettings';
 import JobView from './JobView';
 
 export type MapState = {
@@ -58,6 +59,7 @@ export default function App() {
           <button type="button" className="wordmark" onClick={() => { setView({ kind: 'home' }); loadJobs(); }}>maply</button>
           <span className="brand-note">Street imagery & accessibility</span>
         </header>
+        <ModelSettings />
 
         {view.kind === 'home' && (
           <Home jobs={jobs} onNew={() => setView({ kind: 'new' })} onOpen={(id) => setView({ kind: 'job', id })} />

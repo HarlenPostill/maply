@@ -24,7 +24,7 @@ from sqlalchemy import BigInteger, func, insert, select
 from sqlalchemy.orm import Session, defer
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app import dataset, osm, prompts, results, tagging
+from app import dataset, osm, prompts, results, tagging, provider_settings
 from app.config import get_settings
 from app.db import get_db
 from app.geo.planning import PlanningError
@@ -40,6 +40,7 @@ app.add_middleware(
     allowed_hosts=[h.strip() for h in os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",") if h.strip()],
 )
 app.include_router(tagging.router)
+app.include_router(provider_settings.router)
 
 SCOPE = MultiPolygon([shape(f["geometry"]) for f in json.loads(settings.scope_geojson_path.read_text())["features"]])
 DONE = ("captured", "accepted", "no_imagery", "blocked", "needs_check")

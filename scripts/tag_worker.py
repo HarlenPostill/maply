@@ -26,7 +26,10 @@ import httpx  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 from app.vision_provider import DEFAULT_MODEL, VisionProviderError, annotate_image, available_models, usage_snapshot  # noqa: E402
+from app.openrouter_provider import annotate_openrouter  # noqa: E402
 from app.tag_schema import LabelResult  # noqa: E402
+
+MAX_PARALLEL_SESSIONS = 20
 
 
 def validation_details(errors: list) -> str:
@@ -53,8 +56,13 @@ def validated_annotation(path: Path, task: dict, *, binary: str | None, timeout:
 
         emit({"kind": "stage", "message": "Requesting image annotation" if not attempt else "Requesting corrected annotation",
               "data": {"stage": "model"}})
-        labels = annotate_image(path, prompt, task["schema"], task["model"], binary=binary, timeout=timeout,
-                                on_event=emit if on_event else None)
+        if task.get("provider", "antigravity") == "openrouter":
+            labels = annotate_openrouter(path, prompt, task["schema"], task["model"],
+                                         api_key=task.get("api_key"), timeout=timeout,
+                                         on_event=emit if on_event else None)
+        else:
+            labels = annotate_image(path, prompt, task["schema"], task["model"], binary=binary, timeout=timeout,
+                                    on_event=emit if on_event else None)
         emit({"kind": "stage", "message": "Validating annotation vocabulary, evidence and confidence",
               "data": {"stage": "validation"}})
         try:
@@ -134,18 +142,19 @@ class Worker:
         response = self.client.get("/api/tagging/settings", timeout=5)
         response.raise_for_status()
         value = response.json().get("parallel_sessions")
-        if type(value) is not int or not 1 <= value <= 8:
-            raise ValueError("Maply returned an invalid parallel session limit; expected 1–8.")
+        if type(value) is not int or not 1 <= value <= MAX_PARALLEL_SESSIONS:
+            raise ValueError(f"Maply returned an invalid parallel session limit; expected 1–{MAX_PARALLEL_SESSIONS}.")
         return value
 
     def run_one(self) -> bool:
         self.heartbeat()
-        claim = self.post("/api/tagging/worker/claim", {"worker_id": self.worker_id, "model": self.model})
+        claim = self.post("/api/tagging/worker/claim", {"worker_id": self.worker_id, "model": self.model, "supports_provider_settings": True})
         task = claim.get("task")
         if not task:
             self.last_claim_reason = "capacity" if claim.get("reason") == "capacity" else "empty"
             return False
         self.last_claim_reason = None
+        self.model = task["model"]
         task_url = f"/api/tagging/worker/tasks/{task['id']}"
         lease = {"worker_id": self.worker_id, "lease_token": task["lease_token"]}
         stop = threading.Event()
@@ -258,7 +267,7 @@ def run_pool(coordinator: Worker, *, poll: float = 3, max_tasks: int | None = No
     """
     stop = stop_event if stop_event is not None else threading.Event()
     factory = worker_factory or Worker
-    executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="maply-tagging")
+    executor = ThreadPoolExecutor(max_workers=MAX_PARALLEL_SESSIONS, thread_name_prefix="maply-tagging")
     workers = []
     active = {}
     processed = failures = 0
@@ -357,9 +366,16 @@ def main() -> int:
         parser.error("--poll, --timeout and --max-tasks must be positive")
     worker = Worker(args.api_url, args.model, binary=args.agy_bin, timeout=args.timeout)
     try:
-        models = available_models(args.agy_bin)
-        if args.model not in models:
-            raise VisionProviderError(f"Model {args.model!r} is not in the signed-in Antigravity catalog.")
+        provider = worker.client.get("/api/tagging/provider")
+        provider.raise_for_status()
+        if provider.json()["provider"] == "antigravity":
+            try:
+                models = available_models(args.agy_bin)
+                selected = provider.json()["antigravity_model"]
+                if selected not in models:
+                    print(f"Antigravity model {selected!r} is unavailable; select a model in the frontend.", file=sys.stderr)
+            except VisionProviderError as exc:
+                print(str(exc) + " You can select OpenRouter in Model settings.", file=sys.stderr)
         print(f"Maply tagging manager ready at {args.api_url} ({args.model}); parallel sessions follow web settings", flush=True)
         stop = threading.Event()
 

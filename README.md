@@ -103,6 +103,25 @@ across too (shots already done in the new job are left alone).
 
 ## 3. Tag captured images with Gemini
 
+Open **Model settings** under the Maply header to choose **Antigravity** (your
+existing local login) or **OpenRouter**. For OpenRouter, paste your API key,
+choose an image-capable model from the live suggestions or enter its full model
+ID, then click **Save model settings**. The default is
+`google/gemini-3.1-flash-lite`. Switch back to Antigravity whenever your allowance
+resets. Switching is manual; OpenRouter requests use your paid API credits.
+
+Keep the host worker below running for either provider. Restart an older worker
+after upgrading Maply. Provider/model changes apply when the worker claims the
+next image, including images already queued; running images retain their original
+provider and model. OpenRouter can start without Antigravity installed or signed in.
+
+Keys are stored in `data/provider-settings.json` with owner-only permissions,
+excluded from Git, and sent only to the local worker and OpenRouter. This file is
+not encrypted; protect local data backups. Public settings responses expose only
+whether a key is saved. Leave the password field blank to keep the key, or select
+**Remove saved OpenRouter key** while using Antigravity to delete it.
+
+
 Start Maply as usual (`docker compose up -d --build`). Run the vision worker in a
 second terminal **on your Mac**, where Antigravity is installed and signed in:
 
@@ -125,12 +144,12 @@ Use `--api-url http://127.0.0.1:8001` if you changed the app port;
 `--once` processes at most one image; `--max-tasks 2` runs a bounded pilot.
 
 Choose **Parallel sessions** in the tagging sidebar or **Activity** panel and
-press **Apply** to run 1–8 images at once. The default is 1. This setting persists
+press **Apply** to run 1–20 images at once. The default is 1. This setting persists
 and applies across all jobs and worker processes. The running manager notices
 changes within a few seconds; increasing it starts more queued work, while
 reducing it lets existing sessions finish before starting more. Postgres enforces
 the cap atomically, so competing sessions cannot claim the same image or exceed
-the selected limit. Eight is Maply's current application limit, not a claimed
+the selected limit. Twenty is Maply's current application limit, not a claimed
 Antigravity account entitlement. Sessions share your account allowance.
 
 One manager performs model discovery and quota refresh for all its sessions.

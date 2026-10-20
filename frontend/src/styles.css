@@ -382,3 +382,13 @@ input:focus { border-color: var(--ink); outline: none; }
 .parallel-effective { font-size: .75rem; color: var(--muted); }
 .parallel-sessions > .fineprint { font-size: .7rem; }
 .parallel-error { display: grid; gap: .3rem; font-size: var(--t-s); }
+
+/* Provider controls stay available from every job. */
+.model-settings { padding: .5rem 1.25rem; border-bottom: 1px solid var(--line); }
+.model-settings > button { width: 100%; text-align: left; }
+.model-settings form { display: grid; gap: .7rem; padding: .6rem 0; }
+.model-settings fieldset { display: grid; gap: .75rem; padding: 0; margin: 0; border: 0; min-width: 0; }
+.model-settings label { display: grid; gap: .35rem; font-size: var(--t-s); font-weight: 700; }
+.model-settings input, .model-settings select { width: 100%; min-width: 0; padding: .6rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; background: var(--paper); color: var(--ink); }
+.model-settings .model-key-clear { display: flex; align-items: center; font-weight: 400; }
+.model-settings .model-key-clear input { width: auto; }

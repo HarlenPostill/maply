@@ -631,14 +631,15 @@ def test_parallel_settings_validate_bounds_and_persist(client):
     assert response.status_code == 200
     assert response.json() == {"parallel_sessions": 1, "max_parallel_sessions": 20, "running": 0}
     assert client.get("/api/tagging/settings").json() == response.json()
-    for value in [0, 9, -1, 1.5, "2", True, None]:
+    for value in [0, 21, -1, 1.5, "2", True, None]:
         invalid = client.patch("/api/tagging/settings", json={"parallel_sessions": value})
         assert invalid.status_code == 422, invalid.text
     assert client.patch("/api/tagging/settings", json={}).status_code == 422
     assert client.patch("/api/tagging/settings", json={"parallel_sessions": 2, "unsupported": True}).status_code == 422
     assert client.get("/api/tagging/settings").json()["parallel_sessions"] == 1
-    assert client.patch("/api/tagging/settings", json={"parallel_sessions": 8}).status_code == 200
-    assert client.get("/api/tagging/settings").json()["parallel_sessions"] == 8
+    for value in [9, 20]:
+        assert client.patch("/api/tagging/settings", json={"parallel_sessions": value}).status_code == 200
+        assert client.get("/api/tagging/settings").json()["parallel_sessions"] == value
 
 
 @pytest.mark.parametrize("capacity", [1, 3, 8])
@@ -759,3 +760,30 @@ def test_expired_lease_releases_global_capacity(client, job):
     assert client.get("/api/tagging/settings").json()["running"] == 1
     assert complete(client, expired).status_code == 409
     assert complete(client, next_task).status_code == 200
+
+
+def test_provider_switch_pins_inflight_and_routes_existing_queue(client, job, monkeypatch):
+    from app import tagging
+    current, _, saved = job
+    queue(client, current, {'shot_ids': [saved[0]['id'], saved[1]['id']]})
+    config = {'configured': True, 'provider': 'openrouter', 'antigravity_model': 'local-model',
+              'openrouter_model': 'google/gemini-3.1-flash-lite', 'api_key': 'private-test-key'}
+    monkeypatch.setattr(tagging, 'provider_settings', lambda: dict(config))
+    # Older workers must not silently send a cloud-selected image to Antigravity.
+    assert client.post(f'{WORKER}/claim', headers=WORKER_HEADERS, json={'worker_id': 'old'}).json()['reason'] == 'upgrade_worker'
+    def next_task():
+        return client.post(f'{WORKER}/claim', headers=WORKER_HEADERS,
+                           json={'worker_id': 'test-worker', 'supports_provider_settings': True}).json()['task']
+    first = next_task()
+    assert first['provider'] == 'openrouter' and first['api_key'] == 'private-test-key'
+    config['provider'] = 'antigravity'
+    second = next_task()
+    assert second['provider'] == 'antigravity' and second['model'] == 'local-model'
+    assert 'api_key' not in second
+    assert complete(client, first).status_code == 200
+    assert complete(client, second).status_code == 200
+    cloud_labels = client.get(f"/api/shots/{first['shot_id']}").json()['labels']
+    local_labels = client.get(f"/api/shots/{second['shot_id']}").json()['labels']
+    assert cloud_labels['provenance']['provider'] == 'openrouter'
+    assert local_labels['provenance']['provider'] == 'antigravity-cli'
+    assert 'private-test-key' not in json.dumps(cloud_labels)

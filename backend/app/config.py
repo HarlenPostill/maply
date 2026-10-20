@@ -1,5 +1,4 @@
-"""Local app settings. Optional vision inference uses a separately running host
-worker and the existing Antigravity CLI login; no API keys are stored here."""
+"""Local app settings. Provider preferences and keys live separately in the data directory."""
 
 from __future__ import annotations
 
