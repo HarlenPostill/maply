@@ -8,7 +8,9 @@ Parsing: reads the camera values the web client writes into its address bar
 (``@lat,lng,3a,{fov}y,{heading}h,{tilt}t/data=...!1s{pano}!2e{kind}``). That
 format is not a published contract, so every parsed value is tagged with the
 provenance ``page_url`` and treated as an observation that can be absent or
-wrong. Imagery dates are never derived from URL parameters.
+wrong. Chrome also emits numeric-a modes such as 15a/16a; these are treated as
+Street View only when explicit panorama data is present. Imagery dates are never
+derived from URL parameters.
 """
 
 from __future__ import annotations
@@ -71,6 +73,14 @@ def parse_streetview_url(url: str) -> ParsedStreetViewUrl:
     out.lat, out.lng = _f(m.group("lat")), _f(m.group("lng"))
     rest = m.group("rest") or ""
     tokens = [t for t in rest.split(",") if t]
+    pm = _PANO_RE.search(path)
+    # Chrome also emits 15a/16a (observed live in Sydney). Numeric-a alone
+    # can describe an aerial map, so require the explicit panorama data too.
+    has_pano_data = pm is not None and '!1e1!' in path
+    mode = tokens[0] if tokens else ''
+    out.is_street_view = mode == '3a' or bool(
+        re.fullmatch(r'\d+(?:\.\d+)?a', mode) and has_pano_data
+    )
     for t in tokens:
         if t == "3a":
             out.is_street_view = True
@@ -82,7 +92,6 @@ def parse_streetview_url(url: str) -> ParsedStreetViewUrl:
             tilt = _f(t[:-1])
             # The client encodes tilt with 90 = horizon; pitch = tilt - 90.
             out.pitch = None if tilt is None else tilt - 90.0
-    pm = _PANO_RE.search(path)
     if pm:
         out.pano_id = pm.group("pano")
         out.pano_kind = pm.group("kind")

@@ -50,14 +50,14 @@ def path(run, task, operation):
     return f"/api/capture/worker/runs/{run['id']}/shots/{task['shot']['id']}/{operation}"
 
 
-def mock_model(monkeypatch, *, action='save', confidence=.98, cost=.002, invalid=False, callback=None):
+def mock_model(monkeypatch, *, action='save', confidence=.98, cost=.002, invalid=False, callback=None, annotation=None):
     calls = []
     def respond(request):
         calls.append(json.loads(request.content))
         if callback:
             callback()
         decision = {'action': action, 'confidence': confidence, 'reason': 'Footpath and kerb are visible',
-                    'start_x': .5, 'start_y': .5, 'end_x': .5, 'end_y': .5, 'image_date': 'Mar 2024'}
+                    'start_x': .5, 'start_y': .5, 'end_x': .5, 'end_y': .5, 'image_date': 'Mar 2024', 'labels': annotation}
         return httpx.Response(200, json={'model': 'other/discounted-model', 'choices': [{'finish_reason': 'stop',
             'message': {'content': '{bad' if invalid else json.dumps(decision)}}],
             'usage': {'prompt_tokens': 100, 'completion_tokens': 40, **({'cost': cost} if cost is not None else {})}})
@@ -346,3 +346,147 @@ def test_model_refusal_becomes_pass_instead_of_stopping_the_run(client, monkeypa
     assert result.status_code == 200 and result.json()['decision']['action'] == 'review'
     assert client.post(path(run, task, 'complete'), headers=H, json=payload(task)).json()['status'] == 'review'
     assert client.get(f"/api/capture/runs/{run['id']}").json()['status'] == 'running'
+
+
+def worker_module():
+    spec = importlib.util.spec_from_file_location('capture_worker_transport', Path(__file__).parents[2] / 'scripts/capture_worker.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['status', 'heartbeat', 'claim', 'assess', 'complete'])
+async def test_worker_only_retries_status_and_heartbeat_after_disconnect(operation):
+    module = worker_module()
+    requests = []
+    def respond(req):
+        requests.append(req)
+        assert req.headers['connection'] == 'close'
+        if len(requests) == 1:
+            raise httpx.RemoteProtocolError('Server disconnected without sending a response.', request=req)
+        return httpx.Response(200, json={'ok': True})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        worker = module.Worker('http://127.0.0.1:8000', str(uuid.uuid4()), None, client)
+        path = 'runs/test' if operation == 'status' else f'worker/runs/test/{operation}'
+        if operation in ('status', 'heartbeat'):
+            assert await worker.api(path, None if operation == 'status' else {}) == {'ok': True}
+            assert len(requests) == 2
+        else:
+            with pytest.raises(DesktopError, match='has not been repeated'):
+                await worker.api(path, {})
+            assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_fresh_connections_survive_idle_browser_work():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    import time
+    connections = []
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+        def do_GET(self):
+            connections.append(self.client_address[1])
+            self.send_response(200)
+            self.send_header('Content-Length', '2')
+            self.end_headers()
+            self.wfile.write(b'{}')
+        def log_message(self, *args): pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    module = worker_module()
+    try:
+        async with httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=0)) as client:
+            worker = module.Worker(f'http://127.0.0.1:{server.server_port}', str(uuid.uuid4()), None, client)
+            for _ in range(3):
+                assert await worker.api('runs/test') == {}
+                time.sleep(.05)  # Simulates native GUI work while the server has its own thread.
+        assert len(set(connections)) == 3
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_startup_failures_do_not_consume_visual_attempts_and_pause_reason_is_saved(client):
+    _, run = new_run(client)
+    for _ in range(4):
+        task = claim(client, run).json()['task']
+        result = client.post(f"/api/capture/runs/{run['id']}/pause", json={'reason': 'Connection lost before assessment'})
+        assert result.json()['error'] == 'Connection lost before assessment'
+        with session_scope() as s:
+            t = s.get(CaptureTask, uuid.UUID(task['shot']['id']))
+            assert t.attempts == 0 and t.status == 'released'
+        assert client.post(f"/api/capture/runs/{run['id']}/resume", json={}).status_code == 200
+    state = client.get(f"/api/capture/runs/{run['id']}").json()
+    assert state['finished'] == 0 and state['requests'] == 0
+
+
+@pytest.mark.parametrize('mode', ['15a', '16a'])
+def test_observed_chrome_urls_save_with_combined_tags_and_the_visible_date(client, monkeypatch, mode):
+    from tests.test_tagging_api import labels
+    _, run = new_run(client)
+    task = claim(client, run).json()['task']
+    body = payload(task)
+    body['page_url'] = body['page_url'].replace(',3a,', f',{mode},')
+    calls = mock_model(monkeypatch, annotation=labels())
+    result = client.post(path(run, task, 'assess'), headers=H, json=body)
+    assert result.status_code == 200, result.text
+    assert result.json()['decision']['action'] == 'save'
+    context = json.loads(calls[0]['messages'][1]['content'][0]['text'])
+    assert 'no_image_date' not in context['camera_flags']
+    saved = client.post(path(run, task, 'complete'), headers=H, json=body)
+    assert saved.status_code == 200, saved.text
+    photo = client.get(f"/api/shots/{task['shot']['id']}").json()
+    assert photo['status'] == 'captured' and photo['flags'] == []
+    assert photo['result']['image_date_iso'] == '2024-03'
+    assert photo['tagging']['status'] == 'completed'
+
+
+def test_repeated_camera_rejections_pause_instead_of_filling_the_backlog(client, monkeypatch):
+    job, run = new_run(client)
+    mock_model(monkeypatch)
+    for index in range(3):
+        task = claim(client, run).json()['task']
+        body = {**payload(task), 'page_url': 'https://www.google.com/maps/@0.00000,0.00000,16a,80y,0h,82t'}
+        result = client.post(path(run, task, 'assess'), headers=H, json=body)
+        if index < 2:
+            assert result.status_code == 200
+            assert client.post(path(run, task, 'complete'), headers=H, json=body).status_code == 200
+        else:
+            assert result.status_code == 409 and 'three consecutive' in result.json()['detail']
+    state = client.get(f"/api/capture/runs/{run['id']}").json()
+    assert state['status'] == 'paused' and state['requests'] == 3
+    assert client.get(f"/api/jobs/{job['id']}/shots?manual_backlog=true").json()['total'] == 2
+
+
+def test_native_url_copy_waits_for_clipboard_without_exposing_clipboard_contents(monkeypatch):
+    from types import SimpleNamespace
+    from app import capture_desktop
+    desktop = object.__new__(MacChrome)
+    desktop.check = lambda: (0, 0, 1000, 800)
+    desktop.gui = SimpleNamespace(hotkey=lambda *args: None, press=lambda key: None)
+    values = iter(['', 'https://www.google.com/maps/@-33.9,151.2,3a'])
+    desktop.clipboard = SimpleNamespace(copy=lambda value: None, paste=lambda: next(values))
+    monkeypatch.setattr(capture_desktop.time, 'sleep', lambda seconds: None)
+    assert desktop.url().startswith('https://www.google.com/maps/')
+    desktop.clipboard = SimpleNamespace(copy=lambda value: None, paste=lambda: 'PRIVATE CLIPBOARD TEXT')
+    with pytest.raises(DesktopError) as error:
+        desktop.url()
+    assert 'Accessibility' in str(error.value) and 'PRIVATE' not in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_capture_preflight_reports_missing_permissions_before_any_browser_input(monkeypatch, tmp_path):
+    import sys
+    module = worker_module()
+    class Desktop:
+        def permissions(self): return {'accessibility': True, 'screen_recording': False}
+        def script(self, code): raise AssertionError('Browser input must wait for permissions')
+    monkeypatch.setattr(module, 'MacChrome', Desktop)
+    monkeypatch.setattr(module.tempfile, 'gettempdir', lambda: str(tmp_path))
+    monkeypatch.setattr(sys, 'argv', ['capture_worker.py', '--run', str(uuid.uuid4()), '--check'])
+    with pytest.raises(DesktopError, match='screen recording'):
+        await module.main()

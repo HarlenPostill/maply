@@ -66,6 +66,11 @@ class NewRun(RunConfig):
     job_id: uuid.UUID
 
 
+class RunControl(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    reason: str | None = Field(default=None, max_length=600)
+
+
 class LeaseRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=100, pattern=r'^[\w.-]+$')
 
@@ -102,6 +107,8 @@ def locked_run(s, rid):
 
 def revoke(s, rid):
     for task in s.scalars(select(CaptureTask).where(CaptureTask.run_id == rid, CaptureTask.status == 'leased').with_for_update()):
+        if task.steps == 0:
+            task.attempts = max(0, task.attempts - 1)
         task.status, task.decision, task.lease_until = 'released', None, now()
 
 
@@ -187,11 +194,13 @@ def get_run(rid: uuid.UUID, s: Session = Depends(get_db)):
 
 
 @router.post('/runs/{rid}/{action}')
-def control_run(rid: uuid.UUID, action: Literal['pause', 'resume', 'stop'], s: Session = Depends(get_db)):
+def control_run(rid: uuid.UUID, action: Literal['pause', 'resume', 'stop'], req: RunControl | None = None, s: Session = Depends(get_db)):
     r = locked_run(s, rid)
     if r.status in ('stopped', 'completed'):
         raise HTTPException(409, 'Create a new run after this run ends')
     r.status, r.error = {'pause': 'paused', 'resume': 'running', 'stop': 'stopped'}[action], None
+    if action == 'pause' and req:
+        r.error = req.reason
     if action == 'resume':
         active(r, s)
     if action in ('pause', 'stop'):
@@ -304,6 +313,8 @@ async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = D
         raise HTTPException(422, 'OpenRouter key is not configured')
     bearing = s.scalar(select(Segment.bearing_deg).where(Segment.job_id == sh.job_id, Segment.key == sh.segment_key))
     flags, camera = camera_check(sh, req.page_url, None, bearing)
+    # The vision model reads imagery dates later; their absence here is not a camera failure.
+    flags = [flag for flag in flags if flag != 'no_image_date']
     parsed_camera = parse_streetview_url(req.page_url)
     camera_valid = (maps_url(req.page_url) and parsed_camera.url_form == 'client_path'
         and parsed_camera.is_street_view and parsed_camera.pano_kind != '10'
@@ -367,7 +378,7 @@ async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = D
     s.add(CaptureEvent(run_id=rid, shot_id=sid, data={
         'model': actual_model,
         'usage': safe_usage,
-        'decision': decision.model_dump() if decision else None, 'error': error}))
+        'decision': decision.model_dump() if decision else None, 'error': error, 'camera_valid': camera_valid}))
     valid = t and t.run_id == rid and t.token == req.token and t.status == 'leased' and t.lease_until > now() and t.steps == step
     if valid:
         t.decision = None
@@ -380,7 +391,14 @@ async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = D
         if decision.action in ('save', 'no_imagery', 'blocked') and decision.confidence < config['min_confidence']:
             decision.action, decision.reason = 'review', 'Confidence below capture threshold: ' + decision.reason[:500]
         if decision.action == 'save' and not camera_valid:
-            decision.action, decision.reason = 'review', 'Camera URL validation failed: ' + ', '.join(flags)
+            decision.action, decision.reason = 'review', 'Camera URL validation failed: ' + (', '.join(flags) or 'missing or out-of-tolerance camera position/heading')
+            # Repeated parser/camera failures are a run problem, not hundreds of independent bad photos.
+            recent = s.scalars(select(CaptureEvent).where(CaptureEvent.run_id == rid)
+                .order_by(CaptureEvent.id.desc()).limit(3)).all()
+            if len(recent) == 3 and all(e.data.get('camera_valid') is False and
+                (e.data.get('decision') or {}).get('action') == 'save' for e in recent):
+                r.status, r.error = 'paused', 'Camera URL validation failed on three consecutive model-approved views. Run paused to check the camera format before collecting more backlog.'
+
         if decision.action == 'save' and decision.labels and isinstance(decision.labels.get('footpath'), dict) and decision.labels['footpath'].get('value') == 'unknown':
             decision.action, decision.reason = 'review', 'Target footpath is uncertain: ' + decision.reason[:500]
         t.decision = {'value': decision.model_dump(), 'sha256': hashlib.sha256(data).hexdigest(), 'page_url': req.page_url,

@@ -6,6 +6,8 @@ Imports are lazy so the backend and unit tests need no graphical desktop.
 from __future__ import annotations
 
 import base64
+import ctypes
+import time
 import io
 import json
 import subprocess
@@ -36,6 +38,14 @@ class MacChrome:
         self.gui.FAILSAFE = True
         self.gui.PAUSE = .2
         self.bounds = None
+
+    def permissions(self):
+        import Quartz
+        accessibility = ctypes.CDLL('/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices')
+        accessibility.AXIsProcessTrusted.restype = ctypes.c_bool
+        accessibility.AXIsProcessTrusted.argtypes = []
+        return {'accessibility': bool(accessibility.AXIsProcessTrusted()),
+                'screen_recording': bool(Quartz.CGPreflightScreenCaptureAccess())}
 
     def script(self, code):
         try:
@@ -83,10 +93,18 @@ class MacChrome:
         self.gui.hotkey('command', 'l')
         self.gui.hotkey('command', 'c')
         value = self.clipboard.paste().strip()
+        for _ in range(10):
+            if value:
+                break
+            time.sleep(.1)
+            value = self.clipboard.paste().strip()
         self.gui.press('escape')
         self.check()
         if not maps_url(value):
-            raise DesktopError('The active tab is no longer a supported Google Maps page')
+            parsed = urlparse(value)
+            if not value or parsed.scheme not in ('http', 'https', 'chrome'):
+                raise DesktopError('Could not copy the Chrome address. Enable Accessibility for Terminal in macOS Privacy & Security, then reopen Terminal and retry.')
+            raise DesktopError(f'Chrome is showing {parsed.scheme}://{parsed.hostname or 'unknown'} instead of Google Maps. Finish Chrome setup and open a Maps tab before retrying.')
         return value
 
     def observe(self):

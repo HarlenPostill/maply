@@ -359,3 +359,69 @@ After changing the extension, click its reload icon on `chrome://extensions`.
 * The extension reads the camera position and imagery date from Google's page
   (address bar and visible text). If Google changes its page, values that
   can't be read are recorded as unknown and the photo is flagged.
+
+### Capture connection troubleshooting
+
+The native worker uses a fresh local HTTP connection for each request, so browser
+loading and screenshot work cannot reuse a socket closed by the server's idle
+timeout. Status reads and heartbeat renewals may reconnect once. Claims, model
+assessments and saves are never blindly replayed after a lost response. The worker
+prints its current stage and saves the failure reason on the paused run. Resume
+that run and rerun its terminal command after fixing the cause. Startup failures
+before the first model assessment do not count toward the visual-attempt limit.
+
+Chrome panorama URLs may use `3a`, `15a` or `16a`. Numeric-a variants require
+explicit panorama metadata; an aerial map URL alone never passes camera checks.
+If three consecutive model-approved images fail camera validation, the run pauses
+for investigation rather than continuing to accumulate manual backlog entries.
+
+## Permanent server Mac and laptop client
+
+Keep one authoritative database and `data/` directory on the server Mac. Other
+computers connect by SSH; they do not start a second Maply app or sync live database
+files. Manual captures, desktop workers, tagging and review all use the same server.
+
+For a complete, consistent handoff, stop capture and export from the source checkout:
+
+```bash
+python3 scripts/server_transfer.py export --output data/transfers/maply-transfer
+```
+
+This leaves the source app stopped and creates a logical PostgreSQL dump, current
+source archive (including uncommitted changes), image/preference archive, and
+SHA-256 manifest. The bundle includes the saved OpenRouter key, is owner-readable,
+and belongs on your private disks/SSH connection. The original files and Docker
+volume are retained. Export bundles are excluded from Git under `data/`.
+
+Copy the entire transfer directory to the server Mac. With Docker/Compose running,
+restore into an empty directory:
+
+```bash
+python3 /path/to/bundle/server_transfer.py restore --bundle /path/to/bundle --project ~/Maply
+```
+
+Restore checks every archive, every data file and database inventory. It refuses
+an existing workspace/database. Capture runs from the source are paused and old
+worker reservations revoked. Tagging remains disabled until the restored app has
+been inspected. Enable it after verification:
+
+```bash
+cd ~/Maply
+python3 scripts/server_transfer.py activate
+python3 scripts/install_server_login.py
+```
+
+The login job starts the container runtime/app and prevents idle system sleep. It
+runs after the server user logs in; it does not bypass the Mac login screen. For
+native capture, keep the laptop open and plugged in, complete Chrome's first-run
+setup, and grant the capture Terminal Accessibility, Automation and Screen Recording
+permissions. Start the capture worker in that Mac's Terminal using the run command
+from Maply. The capture worker itself is not started by the server login job.
+
+On the client Mac, `scripts/connect_server.py` reads `data/client-server.json` with
+`host`, `identity_file`, `local_port`, `remote_port` and `expected_job_ids`. It opens
+a loopback-only SSH tunnel, checks the expected jobs and opens the app. A client
+login tunnel can keep port 8000 available automatically, so the extension retains
+its usual `http://127.0.0.1:8000` setting. Never start the old local app on this Mac
+once the server becomes authoritative. Reserve the server's IP in the router, or
+update its SSH hostname when the address changes.

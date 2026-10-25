@@ -114,3 +114,19 @@ def test_no_imagery_and_operator_decisions(tmp_path):
 def test_side_convention():
     assert side_of_heading(270, 0) == "left" and side_of_heading(90, 0) == "right"
     assert side_of_heading(90, 180) == "left"  # same east footpath is 'left' of a southbound segment
+
+
+@pytest.mark.parametrize('mode', ['3a', '15a', '16a', '15.5a'])
+def test_chrome_panorama_modes_preserve_observed_camera(mode):
+    url = f'https://www.google.com/maps/@-33.90308,151.1912439,{mode},80y,311.2h,82t/data=!3m7!1e1!3m5!1s_lzaXylb0vw9c6h2qcHvPQ!2e0!7i16384!8i8192?entry=ttu'
+    p = parse_streetview_url(url)
+    assert p.is_street_view and p.url_form == 'client_path'
+    assert p.heading == pytest.approx(311.2) and p.fov == 80 and p.pitch == -8
+    assert p.pano_id == '_lzaXylb0vw9c6h2qcHvPQ' and p.pano_kind == '0'
+    assert p.provenance == 'page_url'
+
+
+@pytest.mark.parametrize('suffix', ['', '/data=!3m1!1e3', '/data=!1sLOOKALIKE!2e0'])
+def test_numeric_a_aerial_views_are_not_panorama_without_explicit_data(suffix):
+    p = parse_streetview_url('https://www.google.com/maps/@-33.90308,151.1912439,16a,80y,311.2h,82t' + suffix)
+    assert not p.is_street_view

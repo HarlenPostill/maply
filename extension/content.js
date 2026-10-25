@@ -12,9 +12,10 @@
   const send = (msg) => chrome.runtime.sendMessage(msg).catch(() => null);
 
   function parseView(href) {
-    const m = decodeURIComponent(href).match(/@(-?\d+\.\d+),(-?\d+\.\d+),3a(?:,([\d.]+)y)?(?:,([\d.]+)h)?(?:,([\d.]+)t)?/);
-    if (!m) return null;
-    return { lat: +m[1], lng: +m[2], fov: m[3] ? +m[3] : null, heading: m[4] != null ? +m[4] % 360 : null, pitch: m[5] != null ? +m[5] - 90 : null };
+    const path = decodeURIComponent(new URL(href).pathname);
+    const m = path.match(/@(-?\d+\.\d+),(-?\d+\.\d+),(\d+(?:\.\d+)?a)(?:,([\d.]+)y)?(?:,([\d.]+)h)?(?:,([\d.]+)t)?/);
+    if (!m || (m[3] !== '3a' && (!path.includes('!1e1!') || !/!1s[^!]+!2e\d+/.test(path)))) return null;
+    return { lat: +m[1], lng: +m[2], fov: m[4] ? +m[4] : null, heading: m[5] != null ? +m[5] % 360 : null, pitch: m[6] != null ? +m[6] - 90 : null };
   }
 
   function metres(a, b) {
