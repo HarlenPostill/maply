@@ -5,7 +5,7 @@ import copy
 import pytest
 from pydantic import ValidationError
 
-from app.tag_schema import LabelResult, SCHEMA_VERSION, TAG_VALUES, build_prompt, cli_json_schema, review_reasons
+from app.tag_schema import LabelResult, SCHEMA_VERSION, TAG_VALUES, build_prompt, annotation_schema, review_reasons
 
 
 def observation(value="present", confidence=0.95, visibility="clear"):
@@ -157,8 +157,8 @@ def test_verge_hazard_is_not_reported_as_a_route_barrier():
     assert review_reasons(labels) == []
 
 
-def test_cli_schema_has_portable_structure_and_complete_enum_vocabulary():
-    schema = cli_json_schema()
+def test_generation_schema_has_portable_structure_and_complete_enum_vocabulary():
+    schema = annotation_schema()
 
     def inspect(node):
         if isinstance(node, dict):

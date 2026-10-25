@@ -1,8 +1,8 @@
 """Three tables: a job, the street segments it covers, and its shots.
 
 A shot is one planned Street View screenshot: where to stand, which way to
-look, the link that opens exactly that view, and the file Codex must save.
-After "Check results" it also records what Codex actually saved and logged.
+look, the link that opens exactly that view, and the image file to save.
+It also records the observed camera position and saved image metadata.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ class Shot(Base):
     footpath: Mapped[str] = mapped_column(String(20), default="", nullable=False)  # compass side, e.g. "west"
     near_node_m: Mapped[float | None] = mapped_column(Float)  # distance to the nearest intersection/corner
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    capture_source: Mapped[str | None] = mapped_column(String(20))  # extension | codex
+    capture_source: Mapped[str | None] = mapped_column(String(20))  # extension | automation | historical import
     labels: Mapped[dict | None] = mapped_column(JSONB)  # reserved for phase 2 (accessibility tags from image analysis)
     # After capture / checking results.
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
@@ -98,7 +98,7 @@ class TagTask(Base):
     shot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("shots.id", ondelete="CASCADE"), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="queued", index=True, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
-    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="antigravity", server_default="antigravity")
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="openrouter", server_default="openrouter")
     image_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     worker_id: Mapped[str | None] = mapped_column(String(100))
     lease_token: Mapped[str | None] = mapped_column(String(64))
@@ -140,3 +140,41 @@ class TagSettings(Base):
     __table_args__ = (CheckConstraint('id = 1'), CheckConstraint('parallel_sessions BETWEEN 1 AND 20'))
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     parallel_sessions: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
+class CaptureRun(Base):
+    __tablename__ = 'capture_runs'
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('jobs.id', ondelete='CASCADE'), index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='running')
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    requests: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    finished: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CaptureTask(Base):
+    __tablename__ = 'capture_tasks'
+    shot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('shots.id', ondelete='CASCADE'), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('capture_runs.id', ondelete='CASCADE'), index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='leased')
+    worker_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    steps: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    decision: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaptureEvent(Base):
+    __tablename__ = 'capture_events'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('capture_runs.id', ondelete='CASCADE'), index=True)
+    shot_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('shots.id', ondelete='CASCADE'))
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

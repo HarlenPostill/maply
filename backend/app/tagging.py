@@ -28,11 +28,11 @@ from app.config import get_settings
 from app.provider_settings import load_settings as provider_settings
 from app.db import get_db, session_scope
 from app.models import Job, Segment, Shot, TagTask, TagWorker, TagTaskEvent, TagSettings
-from app.tag_schema import LabelResult, SCHEMA_VERSION, build_prompt, cli_json_schema, review_reasons
+from app.tag_schema import LabelResult, SCHEMA_VERSION, build_prompt, annotation_schema, review_reasons
 from app.confidence import confidence_for_labels, aggregate_confidence
 
 router = APIRouter(prefix='/api')
-MODEL = 'gemini-3.8-flash-low'
+MODEL = 'google/gemini-3.1-flash-lite'
 ELIGIBLE = ('captured', 'accepted', 'needs_check')
 LEASE_SECONDS = 300
 MAX_PARALLEL_SESSIONS = 20
@@ -40,7 +40,7 @@ MAX_PARALLEL_SESSIONS = 20
 
 def selected_model():
     value = provider_settings()
-    return value[value['provider'] + '_model']
+    return value['openrouter_model']
 
 
 def now():
@@ -199,10 +199,10 @@ def enqueue(jid: uuid.UUID, req: Selection, s: Session = Depends(get_db)):
             sh.result = {**sh.result, 'sha256': sha}
             sh.labels = None
         if t is None:
-            t = TagTask(shot_id=sh.id, status='queued', model=MODEL, image_sha256=sha)
+            t = TagTask(shot_id=sh.id, status='queued', model=selected_model(), provider='openrouter', image_sha256=sha)
             s.add(t)
         else:
-            t.status, t.model, t.image_sha256 = 'queued', MODEL, sha
+            t.status, t.model, t.image_sha256, t.provider = 'queued', selected_model(), sha, 'openrouter'
             t.error, t.worker_id, t.lease_token, t.lease_until = None, None, None, None
             t.needs_review = 0
             t.confidence, t.started_at = None, None
@@ -294,7 +294,6 @@ def activity_snapshot(s, jid, status=None, limit=50, offset=0):
     counts = empty_counts()
     for _, _, _, st, review, n in grouped(s, jid):
         add_count(counts, st, review, n)
-    usage = s.scalar(select(TagWorker.usage).where(TagWorker.usage.is_not(None)).order_by(TagWorker.usage['fetched_at'].astext.desc()).limit(1))
     items = [{'task_id': str(t.id), 'shot_id': str(t.shot_id), 'code': code, 'street': street, 'side': side,
               'status': t.status, 'model': t.model, 'attempts': t.attempts, 'error': t.error,
               'updated_at': t.updated_at.isoformat(), 'started_at': t.started_at.isoformat() if t.started_at else None,
@@ -302,7 +301,7 @@ def activity_snapshot(s, jid, status=None, limit=50, offset=0):
               'confidence': t.confidence if t.status == 'completed' else None}
              for t, code, street, side in rows]
     s.commit()
-    return {'items': items, 'total': total, 'counts': counts, 'usage': usage, 'settings': settings_dict(s)}
+    return {'items': items, 'total': total, 'counts': counts, 'settings': settings_dict(s)}
 
 
 @router.get('/jobs/{jid}/tagging/activity')
@@ -369,37 +368,11 @@ def _worker_header(x_maply: str | None = Header(None)):
 worker_router = APIRouter(prefix='/tagging/worker', dependencies=[Depends(_worker_header)])
 
 
-class UsageBucket(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    id: str = Field(max_length=100)
-    name: str = Field(max_length=100)
-    window: str = Field(max_length=100)
-    remaining_fraction: float = Field(ge=0, le=1, allow_inf_nan=False)
-    reset_time: str | None = Field(default=None, max_length=100)
-
-
-class UsageGroup(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    name: str = Field(max_length=100)
-    buckets: list[UsageBucket] = Field(max_length=30)
-
-
-class UsageSnapshot(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    status: Literal['available', 'unavailable']
-    fetched_at: datetime
-    source: Literal['antigravity-cli']
-    groups: list[UsageGroup] = Field(default_factory=list, max_length=20)
-    error: str | None = Field(default=None, max_length=500)
-
-
 class WorkerRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     worker_id: str = Field(min_length=1, max_length=100)
     model: str = Field(default=MODEL, min_length=1, max_length=100)
     error: str | None = Field(default=None, max_length=4000)
-    usage: UsageSnapshot | None = None
-    supports_provider_settings: bool = False
 
 
 class LeaseRequest(BaseModel):
@@ -444,8 +417,6 @@ class EventRequest(LeaseRequest):
 
 def touch_worker(s, req):
     values = {'model': req.model, 'last_seen': now(), 'error': req.error}
-    if req.usage is not None:
-        values['usage'] = req.usage.model_dump(mode='json')
     s.execute(insert(TagWorker).values(id=req.worker_id, **values).on_conflict_do_update(index_elements=[TagWorker.id], set_=values))
 
 
@@ -468,12 +439,7 @@ def claim(req: WorkerRequest, s: Session = Depends(get_db)):
         s.commit()
         return {'task': None, 'reason': 'capacity'}
     provider = provider_settings()
-    if provider.get('configured') and not req.supports_provider_settings:
-        s.commit()
-        return {'task': None, 'reason': 'upgrade_worker'}
     conditions = [TagTask.status == 'queued']
-    if not req.supports_provider_settings:
-        conditions.append(TagTask.model == req.model)
     t = s.execute(select(TagTask).where(*conditions).order_by(
         TagTask.updated_at, TagTask.id).with_for_update(skip_locked=True).limit(1)).scalar_one_or_none()
     if not t:
@@ -491,9 +457,7 @@ def claim(req: WorkerRequest, s: Session = Depends(get_db)):
         add_event(s, t, 'failed', t.error)
         s.commit()
         return {'task': None}
-    if req.supports_provider_settings:
-        t.provider = provider['provider']
-        t.model = provider[t.provider + '_model'] if provider.get('configured') else req.model
+    t.provider, t.model = 'openrouter', provider['openrouter_model']
     t.status, t.worker_id, t.lease_token = 'running', req.worker_id, uuid.uuid4().hex
     t.lease_until, t.updated_at = now() + timedelta(seconds=LEASE_SECONDS), now()
     t.attempts += 1
@@ -506,11 +470,8 @@ def claim(req: WorkerRequest, s: Session = Depends(get_db)):
     task = {'id': str(t.id), 'lease_token': t.lease_token, 'shot_id': str(sh.id),
             'image_url': f'/files/{quote(j.slug)}/{quote(sh.result["file"], safe="/")}?sha={t.image_sha256}',
             'image_sha256': t.image_sha256, 'prompt': build_prompt(metadata),
-            'schema': cli_json_schema(), 'model': t.model}
-    if req.supports_provider_settings:
-        task['provider'] = t.provider
-        if t.provider == 'openrouter':
-            task['api_key'] = provider['api_key']
+            'schema': annotation_schema(), 'model': t.model}
+    task['provider'], task['api_key'] = 'openrouter', provider['api_key']
     s.commit()
     return {'task': task}
 
@@ -546,6 +507,40 @@ def task_event(tid: uuid.UUID, req: EventRequest, s: Session = Depends(get_db)):
     return {'ok': True}
 
 
+def store_labels(s, sh, t, labels, model, *, provenance=None):
+    from app import backlog
+    labels = LabelResult.model_validate(labels).model_dump(mode='json')
+    j = s.get(Job, sh.job_id)
+    labels['review_reasons'] = list(dict.fromkeys(labels['review_reasons'] + review_reasons(labels)))
+    if sh.flags:
+        labels['review_reasons'].append('Source photo capture flags: ' + ', '.join(sh.flags))
+    labels['provenance'] = {'task_id': str(t.id), 'attempt': t.attempts, 'image_sha256': t.image_sha256,
+                            'model': model, 'provider': 'openrouter', 'schema_version': SCHEMA_VERSION,
+                            'tagged_at': now().isoformat(), 'imagery_date': sh.result.get('image_date_iso'),
+                            'shot_id': str(sh.id), 'segment_key': sh.segment_key, 'side': sh.side,
+                            'confidence_kind': 'model_reported_uncalibrated'}
+    # Keep each successful attempt on disk as well as the current labels in Postgres.
+    out = get_settings().jobs_dir / j.slug / 'labels'
+    out.mkdir(parents=True, exist_ok=True)
+    dest = out / f'{sh.code}_{t.id}_{t.attempts}.json'
+    tmp = dest.with_suffix('.tmp')
+    tmp.write_text(json.dumps(labels, indent=2))
+    tmp.replace(dest)
+    sh.labels = labels
+    t.status, t.error, t.needs_review = 'completed', None, int(bool(labels['review_reasons']))
+    t.confidence = confidence_for_labels(labels)
+    add_event(s, t, 'completed', 'Validated annotation saved.')
+    t.lease_token, t.lease_until, t.updated_at = None, None, now()
+    if provenance:
+        labels['provenance'].update(provenance)
+        sh.labels = labels
+        tmp.write_text(json.dumps(labels, indent=2))
+        tmp.replace(dest)
+    if labels['review_reasons']:
+        backlog.flag(sh, '; '.join(labels['review_reasons'])[:1200])
+    return bool(t.needs_review)
+
+
 @worker_router.post('/tasks/{tid}/complete')
 def complete(tid: uuid.UUID, req: CompleteRequest, s: Session = Depends(get_db)):
     # Match enqueue's Shot -> TagTask lock ordering to avoid a retry/completion deadlock.
@@ -562,27 +557,7 @@ def complete(tid: uuid.UUID, req: CompleteRequest, s: Session = Depends(get_db))
         raise HTTPException(409, t.error)
     if req.model != t.model:
         raise HTTPException(422, 'Result model does not match the queued model')
-    labels = req.labels.model_dump(mode='json')
-    labels['review_reasons'] = list(dict.fromkeys(labels['review_reasons'] + review_reasons(labels)))
-    if sh.flags:
-        labels['review_reasons'].append('Source photo capture flags: ' + ', '.join(sh.flags))
-    labels['provenance'] = {'task_id': str(t.id), 'attempt': t.attempts, 'image_sha256': t.image_sha256,
-                            'model': req.model, 'provider': 'openrouter' if t.provider == 'openrouter' else 'antigravity-cli', 'schema_version': SCHEMA_VERSION,
-                            'tagged_at': now().isoformat(), 'imagery_date': sh.result.get('image_date_iso'),
-                            'shot_id': str(sh.id), 'segment_key': sh.segment_key, 'side': sh.side,
-                            'confidence_kind': 'model_reported_uncalibrated'}
-    # Keep each successful attempt on disk as well as the current labels in Postgres.
-    out = get_settings().jobs_dir / j.slug / 'labels'
-    out.mkdir(parents=True, exist_ok=True)
-    dest = out / f'{sh.code}_{t.id}_{t.attempts}.json'
-    tmp = dest.with_suffix('.tmp')
-    tmp.write_text(json.dumps(labels, indent=2))
-    tmp.replace(dest)
-    sh.labels = labels
-    t.status, t.error, t.needs_review = 'completed', None, int(bool(labels['review_reasons']))
-    t.confidence = confidence_for_labels(labels)
-    add_event(s, t, 'completed', 'Validated annotation saved.')
-    t.lease_token, t.lease_until, t.updated_at = None, None, now()
+    store_labels(s, sh, t, req.labels.model_dump(mode='json'), req.model)
     s.commit()
     return {'ok': True, 'needs_review': bool(t.needs_review)}
 

@@ -556,37 +556,11 @@ def test_activity_scope_queue_positions_pagination_filters_and_stale_images(clie
     assert [item["queue_position"] for item in body["items"]] == [1, 2]
 
 
-def test_worker_usage_snapshots_are_validated_and_omission_preserves_last_snapshot(client, job):
+def test_local_quota_payloads_are_rejected(client, job):
     current, _, _ = job
-    snapshot = {
-        "status": "available", "fetched_at": "2026-10-19T02:00:00Z", "source": "antigravity-cli",
-        "groups": [{"name": "Gemini", "buckets": [{
-            "id": "gemini-fast", "name": "Fast models", "window": "five_hours",
-            "remaining_fraction": 0.35, "reset_time": "2026-10-19T05:00:00Z",
-        }]}],
-    }
-
-    def heartbeat(**fields):
-        return client.post(f"{WORKER}/heartbeat", headers=WORKER_HEADERS, json={"worker_id": "usage-worker", **fields})
-
-    assert heartbeat(usage=snapshot).status_code == 200
-    saved_usage = activity(client, current)["usage"]
-    assert saved_usage["status"] == "available"
-    assert saved_usage["groups"][0]["buckets"][0]["remaining_fraction"] == 0.35
-    assert heartbeat().status_code == 200
-    assert activity(client, current)["usage"] == saved_usage
-    for fraction in [-0.01, 1.01, "invalid"]:
-        invalid = json.loads(json.dumps(snapshot))
-        invalid["groups"][0]["buckets"][0]["remaining_fraction"] = fraction
-        assert heartbeat(usage=invalid).status_code == 422
-    assert heartbeat(usage={**snapshot, "fetched_at": "not-a-date"}).status_code == 422
-    assert activity(client, current)["usage"] == saved_usage
-    unavailable = {"status": "unavailable", "fetched_at": "2026-10-19T02:01:00Z", "source": "antigravity-cli", "groups": [], "error": "Provider did not report allowance"}
-    assert heartbeat(usage=unavailable).status_code == 200
-    usage = activity(client, current)["usage"]
-    assert usage["status"] == "unavailable" and usage["groups"] == []
-    assert heartbeat().status_code == 200
-    assert activity(client, current)["usage"] == usage
+    r = client.post(f'{WORKER}/heartbeat', headers=WORKER_HEADERS, json={'worker_id': 'old', 'usage': {'status': 'available'}})
+    assert r.status_code == 422
+    assert 'usage' not in activity(client, current)
 
 
 @pytest.mark.asyncio
@@ -741,7 +715,7 @@ def test_parallel_limit_is_shared_across_models(client, job):
     assert blocked.json() == {"task": None, "reason": "capacity"}
     client.patch("/api/tagging/settings", json={"parallel_sessions": 2})
     allowed = client.post(f"{WORKER}/claim", headers=WORKER_HEADERS, json=payload).json()["task"]
-    assert allowed["model"] == "other-vision-model" and allowed["shot_id"] == saved[1]["id"]
+    assert allowed["model"] == "google/gemini-3.1-flash-lite" and allowed["shot_id"] == saved[1]["id"]
     assert client.get("/api/tagging/settings").json()["running"] == 2
 
 
@@ -762,28 +736,89 @@ def test_expired_lease_releases_global_capacity(client, job):
     assert complete(client, next_task).status_code == 200
 
 
-def test_provider_switch_pins_inflight_and_routes_existing_queue(client, job, monkeypatch):
+def test_model_switch_pins_inflight_and_routes_existing_queue(client, job, monkeypatch):
     from app import tagging
     current, _, saved = job
     queue(client, current, {'shot_ids': [saved[0]['id'], saved[1]['id']]})
-    config = {'configured': True, 'provider': 'openrouter', 'antigravity_model': 'local-model',
-              'openrouter_model': 'google/gemini-3.1-flash-lite', 'api_key': 'private-test-key'}
+    config = {'provider': 'openrouter', 'openrouter_model': 'google/gemini-3.1-flash-lite', 'api_key': 'private-test-key'}
     monkeypatch.setattr(tagging, 'provider_settings', lambda: dict(config))
-    # Older workers must not silently send a cloud-selected image to Antigravity.
-    assert client.post(f'{WORKER}/claim', headers=WORKER_HEADERS, json={'worker_id': 'old'}).json()['reason'] == 'upgrade_worker'
-    def next_task():
-        return client.post(f'{WORKER}/claim', headers=WORKER_HEADERS,
-                           json={'worker_id': 'test-worker', 'supports_provider_settings': True}).json()['task']
-    first = next_task()
-    assert first['provider'] == 'openrouter' and first['api_key'] == 'private-test-key'
-    config['provider'] = 'antigravity'
-    second = next_task()
-    assert second['provider'] == 'antigravity' and second['model'] == 'local-model'
-    assert 'api_key' not in second
+    first = claim(client)
+    config['openrouter_model'] = 'other/vision'
+    second = claim(client)
+    assert first['model'] == 'google/gemini-3.1-flash-lite' and second['model'] == 'other/vision'
+    assert first['provider'] == second['provider'] == 'openrouter'
     assert complete(client, first).status_code == 200
     assert complete(client, second).status_code == 200
-    cloud_labels = client.get(f"/api/shots/{first['shot_id']}").json()['labels']
-    local_labels = client.get(f"/api/shots/{second['shot_id']}").json()['labels']
-    assert cloud_labels['provenance']['provider'] == 'openrouter'
-    assert local_labels['provenance']['provider'] == 'antigravity-cli'
-    assert 'private-test-key' not in json.dumps(cloud_labels)
+    for task in [first, second]:
+        observed = client.get(f"/api/shots/{task['shot_id']}").json()['labels']
+        assert observed['provenance']['provider'] == 'openrouter'
+        assert 'private-test-key' not in json.dumps(observed)
+
+
+@pytest.mark.parametrize('uncertain', [False, True])
+def test_app_managed_openrouter_tags_and_routes_uncertainty_to_backlog(client, job, monkeypatch, uncertain):
+    from app import openrouter_worker, tagging
+    current, _, saved = job
+    queue(client, current, {'shot_ids': [saved[0]['id']]})
+    config = {'provider': 'openrouter', 'openrouter_model': 'test/vision', 'api_key': 'test-key'}
+    monkeypatch.setattr(openrouter_worker, 'load_settings', lambda: dict(config))
+    monkeypatch.setattr(tagging, 'provider_settings', lambda: dict(config))
+    annotation = labels() if not uncertain else {
+        'schema_version': 'maply-accessibility/1', 'footpath': {
+            'value': 'unknown', 'confidence': None, 'visibility': 'occluded', 'evidence': 'A truck obscures the target route'},
+        'features': [], 'notes': [], 'review_reasons': ['Please inspect this image manually']}
+    requests = []
+    def annotate(path, prompt, schema, model, **kwargs):
+        requests.append(model)
+        return annotation
+    monkeypatch.setattr(openrouter_worker, 'annotate_openrouter', annotate)
+    assert openrouter_worker.run_one('test-app-service')
+    result = client.get(f"/api/shots/{saved[0]['id']}").json()
+    assert result['tagging']['status'] == 'completed'
+    assert result['labels']['provenance']['provider'] == 'openrouter'
+    assert requests == ['test/vision']
+    review = client.get(f"/api/jobs/{current['id']}/shots?manual_backlog=true").json()
+    assert review['total'] == (1 if uncertain else 0)
+    if uncertain:
+        assert result['status'] == 'needs_check' and 'manual_review' in result['flags']
+        assert client.patch(f"/api/shots/{saved[0]['id']}", json={'status': 'accepted'}).status_code == 200
+        assert client.get(f"/api/jobs/{current['id']}/shots?manual_backlog=true").json()['total'] == 0
+
+
+@pytest.mark.asyncio
+async def test_app_tagger_respects_concurrency_and_drains_on_shutdown(monkeypatch):
+    import asyncio
+    import threading
+    from app import openrouter_worker
+    lock, started, release = threading.Lock(), threading.Event(), threading.Event()
+    active = peak = 0
+    identities = set()
+    def run_one(identity):
+        nonlocal active, peak
+        with lock:
+            identities.add(identity)
+            active += 1
+            peak = max(peak, active)
+            if active == 2:
+                started.set()
+        release.wait(5)
+        with lock:
+            active -= 1
+        return True
+    monkeypatch.setattr(openrouter_worker, 'run_one', run_one)
+    monkeypatch.setattr(openrouter_worker, 'capacity', lambda identity: (2, 10))
+    monkeypatch.setattr(openrouter_worker, 'load_settings', lambda: {'api_key': 'test-key'})
+    stop = asyncio.Event()
+    manager = asyncio.create_task(openrouter_worker.serve(stop))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        stop.set()
+        await asyncio.sleep(.05)
+        assert not manager.done()
+        release.set()
+        await asyncio.wait_for(manager, 2)
+        assert peak == 2 and len(identities) == 2 and active == 0
+    finally:
+        stop.set()
+        release.set()
+        await manager

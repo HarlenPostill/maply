@@ -103,7 +103,7 @@ function Home({ jobs, onNew, onOpen }: { jobs: JobSummary[]; onNew: () => void; 
       {jobs.length === 0 ? (
         <div className="empty">
           <p>No jobs yet.</p>
-          <p className="muted">Start a job by blocking out a few streets on the map. maply plans every photo and writes the prompt you give to Codex.</p>
+          <p className="muted">Start a job by blocking out a few streets on the map. maply plans every photo for automatic OpenRouter capture or manual capture in Chrome.</p>
         </div>
       ) : (
         <ul className="job-list">

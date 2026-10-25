@@ -69,6 +69,7 @@ export type Shot = PlannedShot & {
   note: string;
   result: Record<string, any>;
   image_url: string | null;
+  review_image_url?: string | null;
   thumb_url: string | null;
 };
 
@@ -76,7 +77,7 @@ export type Job = JobSummary & { area: Geo | null; streets: FC | null; street_co
 
 export type ShotPage = { total: number; items: Shot[] };
 
-export type Prompt = { text: string; shots: string[]; label: string; log_file: string; batches: number };
+
 
 export type VisionTag = { value: string; confidence: number | null; evidence: string; visibility: string };
 export type AccessibilityFeature = {
@@ -112,9 +113,9 @@ export type ActivityItem = {
   updated_at: string; started_at: string | null; events: ActivityEvent[];
   confidence: ConfidenceSummary | null; queue_position?: number | null;
 };
-export type UsageSnapshot = { status: 'available' | 'unavailable'; fetched_at: string; source: string; groups: { name: string; buckets: { id: string; name: string; window: string; remaining_fraction: number | null; reset_time?: string | null }[] }[]; error?: string };
+
 export type TaggingSettings = { parallel_sessions: number; max_parallel_sessions: number; running: number };
-export type ActivitySnapshot = { items: ActivityItem[]; counts: TagCounts; usage: UsageSnapshot | null; total: number; settings?: TaggingSettings };
+export type ActivitySnapshot = { items: ActivityItem[]; counts: TagCounts; total: number; settings?: TaggingSettings };
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(path, {

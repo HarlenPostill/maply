@@ -1,7 +1,7 @@
 """Turn streets + options into a list of shots, and write the job folder.
 
 Each shot has a stable code (P007-L1), the documented Google Maps Street View
-link for that exact position and view, and the file name Codex must save.
+link for that exact position and view, and the image file name.
 """
 
 from __future__ import annotations
@@ -248,11 +248,10 @@ def slugify(name: str) -> str:
 
 
 def write_job_folder(slug: str, name: str, options: JobOptions, shots: list[ShotSpec], summary: dict | None = None) -> None:
-    """Write the plain files Codex (and you) can read without the app."""
+    """Write the portable plan and capture metadata."""
     root = get_settings().jobs_dir / slug
     (root / "images").mkdir(parents=True, exist_ok=True)
     (root / "results").mkdir(exist_ok=True)
-    (root / "prompts").mkdir(exist_ok=True)
     (root / "job.json").write_text(json.dumps({"name": name, "options": options.model_dump(), "summary": summary or {}, "shots_file": "shots.csv"}, indent=2))
     with open(root / "shots.csv", "w", newline="") as f:
         w = csv.writer(f)

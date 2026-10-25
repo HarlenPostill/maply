@@ -40,7 +40,7 @@ SCHEMA = {
         "thumb": "480 px preview path",
         "sha256 / width / height / bytes": "File checksum and size",
         "captured_at": "When the photo was saved (UTC). Not the imagery date.",
-        "capture_source": "extension (you, in Chrome) or codex",
+        "capture_source": "extension (manual Chrome), automation (OpenRouter desktop capture), or a legacy import",
         "street.name / highway": "OpenStreetMap street name and road class",
         "street.osm_way_ids / osm_tags": "OSM ways and tags such as sidewalk, kerb, surface, maxspeed, lanes, oneway, lit",
         "street.segment_key / segment_bearing_deg": "maply segment and its direction (true north); left/right are relative to it",

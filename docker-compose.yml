@@ -25,6 +25,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     image: maply-app:local
+    stop_grace_period: 150s
     env_file:
       - path: .env
         required: false
@@ -35,7 +36,7 @@ services:
       HOST_DATA_DIR: ${PWD:-.}/data
       STREETS_FILE: /data/osm/city_of_sydney_streets.geojson
       SCOPE_GEOJSON_PATH: /app/config/city_of_sydney_approx.geojson
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 10"]
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     volumes:

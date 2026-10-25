@@ -1,5 +1,6 @@
+import CapturePanel from './CapturePanel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type Job, type Prompt, type Shot, type ShotPage, type Status, type FC, type TaggingSummary, type TagSelector, type AccessibilityFeature } from './api';
+import { api, type Job, type Shot, type ShotPage, type Status, type FC, type TaggingSummary, type TagSelector, type AccessibilityFeature } from './api';
 import type { Cone } from './MapView';
 import { aggregateSegments, TaggingPanel, TagLegend, TagResults, tagStatus, words } from './Tagging';
 import { ImageRegions } from './ImageRegions';
@@ -7,7 +8,7 @@ import { ActivityPeek, TaggingActivity, useTaggingActivity } from './TaggingActi
 import { confidencePercent } from './Confidence';
 import ParallelSessions, { useParallelSessions } from './ParallelSessions';
 import type { MapState } from './App';
-import { ago, bytes, flagWords, STATUS_WORDS } from './words';
+import { bytes, flagWords, STATUS_WORDS } from './words';
 
 type Props = {
   id: string;
@@ -21,6 +22,7 @@ type Props = {
 const MAP_MIN_ZOOM = 16; // below this, big jobs show no individual shots
 const SMALL_JOB = 4000; // small jobs load every shot at once
 const FILTERS = {
+  backlog: { label: 'Manual backlog', status: 'pending,skipped,retake,needs_check,captured,accepted,no_imagery,blocked' },
   saved: { label: 'Saved', status: 'captured,needs_check,accepted,retake' },
   attention: { label: 'Needs a look', status: 'needs_check,retake' },
   pending: { label: 'Not taken yet', status: 'pending' },
@@ -77,9 +79,6 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
   const [selected, setSelected] = useState<Shot | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
-  const [codexOpen, setCodexOpen] = useState(false);
-  const [batch, setBatch] = useState(1);
-  const [prompt, setPrompt] = useState<Prompt | null>(null);
   const [busy, setBusy] = useState('');
   const view = useRef<{ bbox: [number, number, number, number]; zoom: number } | null>(null);
 
@@ -154,7 +153,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
 
   const loadPage = useCallback(async (append: boolean, offset = 0) => {
     const limit = append ? 60 : pageLimit.current;
-    const p = await api.get<ShotPage>(`/api/jobs/${id}/shots?include_labels=false&status=${FILTERS[filter].status}${tagFilter === 'all' ? '' : `&tagging_status=${tagFilter}`}&order=recent&offset=${offset}&limit=${limit}`);
+    const p = await api.get<ShotPage>(`/api/jobs/${id}/shots?include_labels=false&status=${FILTERS[filter].status}${filter === 'backlog' ? '&manual_backlog=true' : tagFilter === 'all' ? '' : `&tagging_status=${tagFilter}`}&order=recent&offset=${offset}&limit=${limit}`);
     if (append) pageLimit.current = offset + p.items.length;
     setPage((prev) => ({ total: p.total, items: append ? [...prev.items, ...p.items] : p.items }));
   }, [id, filter, tagFilter]);
@@ -195,7 +194,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
   useEffect(() => {
     if (!job) return;
     const c = job.counts;
-    const n = (k: FilterKey) => FILTERS[k].status.split(',').reduce((t, st) => t + (c[st] ?? 0), 0);
+    const n = (k: FilterKey) => k === 'backlog' ? (c.manual_review ?? 0) : FILTERS[k].status.split(',').reduce((t, st) => t + (c[st] ?? 0), 0);
     setOverlay(
       <>
         <div className="stage-switch seg" role="group" aria-label="Show">
@@ -206,7 +205,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
         {stage === 'map' && <div className="map-mode seg" role="group" aria-label="Map layer"><button aria-pressed={mapMode === 'tagging'} onClick={() => setMapMode('tagging')}>Tagging progress</button><button aria-pressed={mapMode === 'capture'} onClick={() => setMapMode('capture')}>Capture</button></div>}
         {stage === 'map' && tooFar && <p className="stage-hint">{mapMode === 'tagging' ? 'Click a street section · zoom in for images' : 'Zoom in to see each photo'}</p>}
         {stage === 'map' && mapMode === 'tagging' && <TagLegend />}
-        {stage === 'activity' && <TaggingActivity jobId={id} snapshot={activity.snapshot} summary={tagging} error={activity.error} connection={activity.connection} busy={!!busy} onOpen={openActivityPhoto} onCancel={cancelTagging} onRefresh={() => { activity.refresh(); loadTagging(); }} onChooseWork={() => document.querySelector('.tag-scope')?.scrollIntoView({ behavior: 'smooth', block: 'start' })} parallelSessions={parallelSessions} />}
+        {stage === 'activity' && <TaggingActivity jobId={id} snapshot={activity.snapshot} summary={tagging} error={activity.error} connection={activity.connection} busy={!!busy} onOpen={openActivityPhoto} onCancel={cancelTagging} onRefresh={() => { activity.refresh(); loadTagging(); }} onChooseWork={() => { const tools = document.querySelector<HTMLDetailsElement>('.tagging-tools'); if (tools) tools.open = true; document.querySelector('.tag-scope')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} parallelSessions={parallelSessions} />}
         {stage === 'photos' && (
           <section className="photos" aria-label="Photos">
             <label className="photo-tag-filter field"><span>Tagging status</span><select aria-label="Filter photos by tagging status" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}><option value="all">All images</option><option value="unlabelled">Not tagged</option><option value="queued">Queued</option><option value="running">Running</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></label>
@@ -223,7 +222,7 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
                   {page.items.map((s) => (
                     <li key={s.id}>
                       <button type="button" className={`tile tile-${s.status}`} onClick={() => setSelected(s)} data-testid="photo-tile">
-                        {s.thumb_url ? <img src={s.thumb_url} alt="" loading="lazy" /> : <span className="tile-empty">{STATUS_WORDS[s.status]}</span>}
+                        {(s.thumb_url || s.review_image_url) ? <img src={s.thumb_url || s.review_image_url || ''} alt="" loading="lazy" /> : <span className="tile-empty">{STATUS_WORDS[s.status]}</span>}
                         <span className="tile-code">{s.code}</span>
                         <span className="tile-look">{s.look}</span><span className={`tile-tag tag-${tagStatus(s)}`}>{words(tagStatus(s))}{s.tagging?.needs_review ? " · needs review" : ""}</span>
                         {s.confidence && <span className="tile-confidence">{confidencePercent(s.confidence.mean)} mean confidence · {s.confidence.unknown} unknown</span>}
@@ -245,11 +244,6 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
   }, [job, stage, filter, page, selected, tooFar, mapMode, busy, tagFilter, activity.snapshot, activity.error, activity.connection, tagging, parallelSessions.settings, parallelSessions.draft, parallelSessions.pending, parallelSessions.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => setOverlay(null), [setOverlay]);
-
-  useEffect(() => {
-    if (!codexOpen) return;
-    api.get<Prompt>(`/api/jobs/${id}/prompt?batch=${batch}`).then(setPrompt).catch((e) => setError(e.message));
-  }, [id, batch, codexOpen]);
 
   async function run(label: string, fn: () => Promise<void>) {
     setBusy(label);
@@ -302,20 +296,9 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
     });
   }
 
-  const check = () => run('check', async () => {
-    const j = await api.post<Job>(`/api/jobs/${id}/check`);
-    setJob(j);
-    setNote(`${j.changed ? `${j.changed} photo${j.changed === 1 ? '' : 's'} updated.` : 'Nothing new.'}${j.unknown_log_entries?.length ? ` The log mentions ${j.unknown_log_entries.length} shots that aren’t in this job.` : ''}`);
-  });
-
   const exportDataset = () => run('dataset', async () => {
     const r = await api.post<{ photos: number; manifest: string }>(`/api/jobs/${id}/dataset`);
     setNote(`Dataset written: ${r.photos.toLocaleString()} photos, listed in ${r.manifest}`);
-  });
-
-  const copyPrompt = (remaining: boolean) => run('copy', async () => {
-    const p = remaining ? await api.get<Prompt>(`/api/jobs/${id}/prompt?remaining=true`) : prompt;
-    if (p?.text && (await copy(p.text))) setNote(remaining ? `Prompt copied for ${p.shots.length} missing photos. Paste it into Codex.` : `Prompt ${batch} copied. Paste it into Codex.`);
   });
 
   async function remove() {
@@ -354,12 +337,21 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
         </p>
       </div>
 
-      <TaggingPanel jobId={id} summary={tagging} error={tagError} loading={tagLoading} busy={!!busy} selectedSegment={selectedSegment} segments={tagSegments} onSelectSegment={setSelectedSegment} onQueue={queueTagging} onCancel={cancelTagging} onPhoto={setSelected} onRefresh={loadTagging} onFocusMap={focusSelection} activity={<><ParallelSessions state={parallelSessions} /><ActivityPeek snapshot={activity.snapshot} onOpen={() => setStage('activity')} /></>} />
+
       {note && <p className="ok" role="status">{note}</p>}
       {error && <p className="error" role="alert">{error}</p>}
 
+      <CapturePanel jobId={id} />
+
       <section className="step">
-        <h2>Capture in Chrome</h2>
+        <h2>Manual backlog</h2>
+        <p className="hint">{(c.manual_review ?? 0).toLocaleString()} photos need your judgment. Uncertain views stay here until you review or capture them by hand.</p>
+        <button className="btn btn-wide" type="button" onClick={() => { setFilter('backlog'); setTagFilter('all'); setStage('photos'); }}>Review backlog</button>
+        <p className="fineprint">In the Chrome extension, select Only manual review backlog to work through these views.</p>
+      </section>
+
+      <details className="step">
+        <summary>Capture manually in Chrome</summary>
         <p className="hint">Open the maply capture extension, choose this job and press Start. Line up each view, then press Enter to save it and open the next. Stop whenever you like; it picks up where you left off.</p>
         <ul className="keys-inline">
           <li><kbd>Enter</kbd> save and next</li>
@@ -368,7 +360,12 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
           <li><kbd>X</kbd> skip</li>
           <li><kbd>[</kbd> back</li>
         </ul>
-      </section>
+      </details>
+
+      <details className="step tagging-tools">
+        <summary>Tag existing photos</summary>
+      <TaggingPanel jobId={id} summary={tagging} error={tagError} loading={tagLoading} busy={!!busy} selectedSegment={selectedSegment} segments={tagSegments} onSelectSegment={setSelectedSegment} onQueue={queueTagging} onCancel={cancelTagging} onPhoto={setSelected} onRefresh={loadTagging} onFocusMap={focusSelection} activity={<><ParallelSessions state={parallelSessions} /><ActivityPeek snapshot={activity.snapshot} onOpen={() => setStage('activity')} /></>} />
+      </details>
 
       <section className="step">
         <h2>Dataset</h2>
@@ -379,26 +376,6 @@ export default function JobView({ id, setMap, setOverlay, onBack, onDeleted }: P
         </div>
         <button type="button" className="btn btn-wide" onClick={exportDataset} disabled={!!busy} data-testid="export-dataset">{busy === 'dataset' ? 'Writing…' : 'Write dataset file'}</button>
         <p className="fineprint">Writes dataset/manifest.jsonl: one line per photo with its street, OSM tags, footpath side, planned and actual camera, imagery date, checks and current accessibility labels, including confidence and evidence.</p>
-      </section>
-
-      <section className="step">
-        <button type="button" className="disclosure" aria-expanded={codexOpen} onClick={() => setCodexOpen(!codexOpen)}>Hand photos to Codex instead</button>
-        {codexOpen && (
-          <>
-            {job.batches > 1 && (
-              <div className="stepper" role="group" aria-label="Choose prompt">
-                <button type="button" className="btn" disabled={batch <= 1} onClick={() => setBatch(batch - 1)} aria-label="Previous prompt">‹</button>
-                <span>Prompt <strong>{batch.toLocaleString()}</strong> of {job.batches.toLocaleString()}</span>
-                <button type="button" className="btn" disabled={batch >= job.batches} onClick={() => setBatch(batch + 1)} aria-label="Next prompt">›</button>
-              </div>
-            )}
-            <pre className="prompt" tabIndex={0} aria-label={`Prompt ${batch}`}>{prompt?.text ?? ''}</pre>
-            <button type="button" className="btn btn-wide" onClick={() => copyPrompt(false)} data-testid="copy-prompt">Copy prompt {job.batches > 1 ? batch : ''}</button>
-            {c.done > 0 && left > 0 && <button type="button" className="btn btn-wide" onClick={() => copyPrompt(true)}>Copy prompt for missing photos</button>}
-            <button type="button" className="btn btn-wide" onClick={check} disabled={!!busy} data-testid="check-photos">{busy === 'check' ? 'Checking…' : 'Check photos Codex saved'}</button>
-            <p className="fineprint">Last checked {ago(job.checked_at)}.</p>
-          </>
-        )}
       </section>
 
       <button type="button" className="btn btn-quiet danger" onClick={remove}>Delete job</button>
@@ -423,12 +400,13 @@ function ShotDetail({ shot, onClose, onReview, busy, onTag }: { shot: Shot; onCl
         <span className={`pill pill-${shot.status}`}>{STATUS_WORDS[shot.status] ?? shot.status}</span>
         <button type="button" className="btn btn-quiet" onClick={onClose}>Close</button>
       </div>
-      {shot.image_url ? (
-        <ImageRegions imageUrl={shot.image_url} code={shot.code} features={shot.labels?.features ?? []} focused={focused?.id ?? null} onFocus={setFocused} imageRef={imageRef} />
+      {(shot.image_url || shot.review_image_url) ? (
+        <ImageRegions imageUrl={shot.image_url || shot.review_image_url || ''} code={shot.code} features={shot.labels?.features ?? []} focused={focused?.id ?? null} onFocus={setFocused} imageRef={imageRef} />
       ) : (
         <div className="detail-img empty-img">No photo saved yet</div>
       )}
       <p className="detail-look">{shot.look}</p>
+      {r.manual_review_reason && <p className="flags">Manual review: {r.manual_review_reason}</p>}
       <TagResults shot={shot} busy={busy} onQueue={onTag} focusedFeature={focused?.id ?? null} onFocus={(f) => { setFocused(f); imageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }} />
       {flags.length > 0 && <ul className="flags">{flags.map((f) => <li key={f}>{f}</li>)}</ul>}
       <dl className="facts">
@@ -442,7 +420,7 @@ function ShotDetail({ shot, onClose, onReview, busy, onTag }: { shot: Shot; onCl
         )}
         {shot.near_node_m != null && (<><dt>Intersection</dt><dd>{Math.round(shot.near_node_m)} m away</dd></>)}
         {r.image_date && (<><dt>Imagery date</dt><dd>{r.image_date}</dd></>)}
-        {shot.captured_at && (<><dt>Saved</dt><dd>{new Date(shot.captured_at).toLocaleString()}{shot.capture_source ? `, by ${shot.capture_source === 'extension' ? 'you in Chrome' : 'Codex'}` : ''}</dd></>)}
+        {shot.captured_at && (<><dt>Saved</dt><dd>{new Date(shot.captured_at).toLocaleString()}{shot.capture_source ? `, by ${shot.capture_source === 'extension' ? 'you in Chrome' : shot.capture_source === 'automation' ? 'automatic capture worker' : 'legacy capture'}` : ''}</dd></>)}
         {r.notes && (<><dt>Note</dt><dd>{r.notes}</dd></>)}
         {r.file && (<><dt>File</dt><dd className="break">{r.file}{r.width ? `, ${r.width}×${r.height}` : ''}</dd></>)}
       </dl>

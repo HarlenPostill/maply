@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app import provider_settings as settings
 from app import openrouter_provider as provider
-from app.vision_provider import VisionProviderError
+from app.vision_common import VisionProviderError
 
 
 @pytest.fixture
@@ -23,12 +23,11 @@ def client(tmp_path, monkeypatch):
 
 
 def payload(**changes):
-    return dict(provider='openrouter', antigravity_model='local-model',
-                openrouter_model='google/gemini-3.1-flash-lite', **changes)
+    return dict(openrouter_model='google/gemini-3.1-flash-lite', **changes)
 
 
 def test_key_is_private_persisted_and_preserved(client, tmp_path):
-    assert client.get('/api/tagging/provider').json()['provider'] == 'antigravity'
+    assert not client.get('/api/tagging/provider').json()['api_key_configured']
     response = client.put('/api/tagging/provider', json=payload(api_key='test-private-key'))
     assert response.status_code == 200
     assert response.json()['api_key_configured']
@@ -41,17 +40,17 @@ def test_key_is_private_persisted_and_preserved(client, tmp_path):
     assert settings.load_settings()['api_key'] == 'test-private-key'
     assert 'test-private-key' not in client.get('/api/tagging/provider').text
     changed = payload(clear_api_key=True)
-    changed['provider'] = 'antigravity'
     assert client.put('/api/tagging/provider', json=changed).status_code == 200
     assert not settings.load_settings()['api_key']
 
 
-def test_openrouter_requires_key_and_rejected_changes_are_atomic(client):
-    assert client.put('/api/tagging/provider', json=payload()).status_code == 422
-    assert client.get('/api/tagging/provider').json()['provider'] == 'antigravity'
-    client.put('/api/tagging/provider', json=payload(api_key='saved-key'))
-    assert client.put('/api/tagging/provider', json=payload(clear_api_key=True)).status_code == 422
-    assert settings.load_settings()['api_key'] == 'saved-key'
+def test_removed_local_settings_are_not_exposed_and_keys_can_be_removed(client, tmp_path):
+    (tmp_path / 'provider-settings.json').write_text(json.dumps({'provider': 'antigravity', 'antigravity_model': 'old',
+        'openrouter_model': 'test/vision', 'api_key': 'saved-key'}))
+    value = client.get('/api/tagging/provider').json()
+    assert value == {'openrouter_model': 'test/vision', 'api_key_configured': True}
+    assert client.put('/api/tagging/provider', json=payload(clear_api_key=True)).status_code == 200
+    assert not settings.load_settings()['api_key']
 
 
 def test_catalog_filters_for_image_and_structured_output(client, monkeypatch):
@@ -108,8 +107,8 @@ def test_truncated_annotation_is_rejected(monkeypatch, tmp_path):
 
 def test_compact_schema_retains_observation_shape_without_changing_cli_schema():
     import copy
-    from app.tag_schema import cli_json_schema
-    original = cli_json_schema()
+    from app.tag_schema import annotation_schema
+    original = annotation_schema()
     before = copy.deepcopy(original)
     compact = provider.openrouter_schema(original)
     assert original == before

@@ -123,3 +123,9 @@ def test_replanned_job_keeps_finished_photos_and_leaves_the_old_job_alone(client
     with session_scope() as s:
         again = carry_over(s, s.get(Job, uuid.UUID(old["id"])), s.get(Job, uuid.UUID(new_id)))
     assert again["copied"] == 0 and again["already_done_in_target"] == 2
+
+
+def test_handoff_endpoints_removed(client):
+    job = client.post('/api/jobs', json={'name': 'Manual', 'streets': GEORGE}).json()
+    assert client.get(f"/api/jobs/{job['id']}/prompt").status_code == 404
+    assert client.put(f"/api/jobs/{job['id']}/handoff", json={'count': 20}).status_code in (404, 405)

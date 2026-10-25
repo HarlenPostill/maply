@@ -1,8 +1,8 @@
-"""Check what Codex saved against the plan.
+"""Check saved images and historical capture logs against the plan.
 
 Reads the job folder:
   images/<code>_....png       one screenshot per shot
-  results/*.jsonl             one JSON line per shot Codex logged (latest wins)
+  results/*.jsonl             one JSON line per historical capture (latest wins)
 
 For each shot it records the saved file, then uses the logged address-bar URL
 (which Google rewrites to the camera's real position and heading) to check the

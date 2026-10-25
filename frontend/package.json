@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Plan Street View photo jobs and generate Codex prompts. Local only; fonts bundled.",
+  "description": "Plan, capture and tag Street View photos with OpenRouter. Local only; fonts bundled.",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc --noEmit && vite build",

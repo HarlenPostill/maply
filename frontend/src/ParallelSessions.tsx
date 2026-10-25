@@ -55,6 +55,6 @@ export default function ParallelSessions({ state }: { state: ParallelSessionsSta
     <div className="parallel-controls"><select aria-label="Parallel sessions" value={draft} disabled={!settings || pending} onChange={(e) => choose(Number(e.target.value))}>{Array.from({ length: settings?.max_parallel_sessions ?? 20 }, (_, index) => index + 1).map((n) => <option key={n} value={n}>{n} session{n === 1 ? '' : 's'}</option>)}</select><button type="button" className="btn" disabled={!changed || pending} onClick={apply}>{pending ? 'Applying…' : 'Apply'}</button></div>
     <p className="parallel-effective" role="status">{settings ? `${settings.running} running · limit ${settings.parallel_sessions}${changed ? ` · ${draft} selected, not applied` : ''}` : error ? 'Session settings unavailable.' : 'Loading session settings…'}</p>
     {error && <div className="parallel-error"><p className="error" role="alert">{error}</p>{!settings && <button type="button" className="btn btn-quiet" onClick={reload}>Retry settings</button>}</div>}
-    <p className="fineprint">More sessions start queued images together. Reducing the limit lets active work finish. Sessions share your account allowance; more sessions may not be faster.</p>
+    <p className="fineprint">More sessions start queued images together. Reducing the limit lets active work finish. Requests use your OpenRouter credits; more sessions may hit provider rate limits.</p>
   </section>;
 }

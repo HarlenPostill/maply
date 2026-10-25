@@ -15,14 +15,15 @@ class Settings(BaseSettings):
 
     # Where job folders live, as seen by this process...
     data_dir: Path = Path("../data")
-    # ...and as seen on your Mac (used in prompts, because Codex runs on the host).
+    # ...and as seen on your Mac (shown in the app for host access).
     # In Docker this is set by docker-compose; on the host it defaults to data_dir.
     host_data_dir: str | None = None
 
     scope_geojson_path: Path = Path("../config/city_of_sydney_approx.geojson")
 
-    # Browser Codex should use (named in prompts and the screenshot command).
+    # Browser used by the native capture adapter.
     browser_app: str = "Google Chrome"
+    tagging_autostart: bool = True
 
     # Street lookup for "block out an area" (OpenStreetMap, no key). If the local
     # street file exists (scripts/fetch_streets.py) it is used and no network is needed;

@@ -8,7 +8,7 @@ the metadata an image model will need later: street, OSM tags, footpath side,
 planned and actual camera position and heading, distance to the nearest
 intersection, and imagery date.
 
-Maply runs locally. Capture and planning need no API keys. Optional accessibility tagging sends selected photos to Gemini through your signed-in Antigravity CLI; it does not require a separate Gemini API key.
+Maply runs locally. Planning and manual Chrome capture need no API keys. Automatic capture and image tagging use your saved OpenRouter key and any compatible image model.
 
 ## Start
 
@@ -83,9 +83,6 @@ capture a tab from a key press if it has that permission. The extension only
 runs on `google.com/maps` pages, and it only sends captures to your local maply
 at `127.0.0.1`.
 
-Prefer to hand batches to Codex? Each job also has **Hand photos to Codex
-instead**: copyable prompts plus a *Check photos* step.
-
 **Re-planning a job you've started.** After a planner change, make a new job
 from an existing one and bring your finished photos across:
 
@@ -101,61 +98,163 @@ inference provenance; stale labels and unfinished tagging work are not copied. I
 photos in the old job afterwards, add `--into <new job folder>` to copy them
 across too (shots already done in the new job are left alone).
 
-## 3. Tag captured images with Gemini
+## Automatic capture with a native desktop worker
 
-Open **Model settings** under the Maply header to choose **Antigravity** (your
-existing local login) or **OpenRouter**. For OpenRouter, paste your API key,
-choose an image-capable model from the live suggestions or enter its full model
-ID, then click **Save model settings**. The default is
-`google/gemini-3.1-flash-lite`. Switch back to Antigravity whenever your allowance
-resets. Switching is manual; OpenRouter requests use your paid API credits.
+Each job now has **Automatic capture in Chrome**. This is a model-independent
+visual loop: screenshots go to an OpenRouter image model, and a host worker
+executes validated mouse drags using native macOS input. It uses no Playwright,
+WebDriver, CDP, headless browser, page scripting or Street View image-download API.
+The worker saves a screenshot of the visible Chrome window through Maply's
+existing image storage and camera checks. The browser window, including its
+visible chrome, is captured at up to 1920×1440 pixels.
 
-Keep the host worker below running for either provider. Restart an older worker
-after upgrading Maply. Provider/model changes apply when the worker claims the
-next image, including images already queued; running images retain their original
-provider and model. OpenRouter can start without Antigravity installed or signed in.
+### First run
 
-Keys are stored in `data/provider-settings.json` with owner-only permissions,
-excluded from Git, and sent only to the local worker and OpenRouter. This file is
-not encrypted; protect local data backups. Public settings responses expose only
-whether a key is saved. Leave the password field blank to keep the key, or select
-**Remove saved OpenRouter key** while using Antigravity to delete it.
+1. Rebuild the local app with `docker compose up -d --build app`. Startup applies
+   migrations through `0009_openrouter_only`; existing jobs and photos are retained.
+2. Save your OpenRouter key in **Model settings** if it is not already configured.
+   Capture reuses that key and selects the model for combined capture/tagging; standalone tagging has its own model setting.
+3. Open Sydney, expand **Automatic capture in Chrome**, and create a run. The
+   defaults are a 200-photo pilot, 1,000 model requests, US$5 reported cost,
+   eight hours, six assessments per photo, and 0.9 minimum model confidence.
+4. On the capture Mac, use a dedicated Chrome profile/window and pause the Maply
+   capture extension in that profile. Keep Chrome on the primary display, at
+   least 800×600, with an awake, unlocked desktop. Grant the terminal/Python
+   **Accessibility**, **Automation** (Chrome and System Events), and **Screen
+   Recording** permissions in macOS System Settings. Restart the terminal after
+   changing permissions if macOS requires it.
+5. Copy the run's command from the job page, or run:
 
+   ```bash
+   cd backend
+   uv run --extra capture python ../scripts/capture_worker.py --run RUN_UUID
+   ```
 
-Start Maply as usual (`docker compose up -d --build`). Run the vision worker in a
-second terminal **on your Mac**, where Antigravity is installed and signed in:
+   Add `--check` to inspect foreground Chrome, clipboard URL reading and screen
+   capture without model calls or navigating to a shot. For overnight operation,
+   prevent idle sleep with macOS `caffeinate`:
+
+   ```bash
+   caffeinate -di uv run --extra capture python ../scripts/capture_worker.py --run RUN_UUID
+   ```
+
+The worker opens a new tab after a five-second countdown. Do not use its desktop
+for other work during capture. Moving the pointer to a screen corner triggers
+PyAutoGUI's fail-safe. Ctrl+C stops the worker and attempts to pause its run.
+The adapter stops if Chrome loses foreground focus, the window geometry changes,
+or the active URL leaves Google Maps. It never executes arbitrary model code,
+keyboard commands, page URLs or clicks. Its only model-controlled physical action
+is a small drag inside the image; it does not move along the street or zoom.
+
+### Models, limits and review
+
+The default combined model is `google/gemini-3.1-flash-lite`. Select another image model supporting
+JSON Schema structured outputs, or enter its full OpenRouter ID. Optional fallback
+IDs are sent to OpenRouter in order for provider failures. The actual returned
+model, token usage, reported USD cost, decision and visual evidence are recorded.
+Prices and discounts are not selected automatically: pause a run, choose **Edit
+model and limits**, save, then resume. Combined capture uses its selected model for both decisions and labels; the standalone tagging model is unchanged. The API uses asynchronous HTTP, allowing independent desktop workers to
+assess shots concurrently.
+
+The photo limit counts saved photos, blocked/no-imagery outcomes and review
+outcomes. Request slots are reserved before network calls. Reported-cost limits
+are checked after each response: one request, or requests already in flight, can
+exceed that threshold. This is not a prepaid hard currency cap; use OpenRouter's
+own credit/key limits for that. Missing cost reporting, malformed output, provider
+errors and access/login challenges pause the run instead of silently retrying.
+Changing limits requires pausing first; the duration restarts when edited.
+
+A save needs sufficient model confidence and a parsed Street View camera URL
+within 40 m and 15° of the plan, on the correct side where known. Ambiguous views,
+loading that never resolves and exhausted adjustment attempts go to the review
+backlog. Passed views have a separate screenshot under `capture-review/`, outside
+the accepted dataset. Review them in Photos or use the extension backlog mode. Confidence is model-reported; inspect a sample of accepted captures
+before a large unattended run. An image being saved does not certify its framing.
+
+Pause/stop revokes reservations. In-flight inference can still finish and incur
+charges, but its stale result cannot trigger an action or save. A crashed worker's
+reservation expires after five minutes; old tokens cannot save after reassignment.
+Three interrupted attempts send the photo to review. Progress, leases, costs and
+model decisions live in PostgreSQL and survive restarts. Run status describes the
+queue; a running run requires a connected terminal worker to make progress.
+
+### Multiple workers
+
+Run the same command on separate Macs, each with its own unlocked desktop. One
+worker per login session is enforced by an OS lock. Atomic database reservations
+prevent duplicate work across runs or workers, and the manual extension skips
+photos currently reserved by a worker. Do not run multiple workers on one shared
+mouse/keyboard desktop. From another Mac, securely tunnel the local API first:
 
 ```bash
-agy models  # verify your login and gemini-3.8-flash-low availability
+ssh -N -L 18000:127.0.0.1:8000 YOUR_MAPLY_MAC
+# In another terminal on that Mac's checkout:
 cd backend
-uv sync
-uv run python ../scripts/tag_worker.py
+uv run --extra capture python ../scripts/capture_worker.py --server http://127.0.0.1:18000 --run RUN_UUID
 ```
 
-The default is `gemini-3.8-flash-low`, tested with the signed-in CLI on existing
-job images. It uses structured JSON output with strict server validation.
+The API key stays on the Maply server. Only screenshots, decisions and job data
+cross the tunnel. Workers currently support macOS Chrome; Windows/Linux need a
+separate native adapter. A VM must provide a working graphical desktop and be
+validated for Street View rendering before use.
 
-The Docker app keeps a persistent queue in Postgres. The host worker downloads
-selected images from your local app into independent session workspaces, calls
-Antigravity in read-only plan mode, and saves validated structured results back to Maply. Credentials stay
-with Antigravity on your Mac. Leave the worker terminal running while tagging.
-Use `--api-url http://127.0.0.1:8001` if you changed the app port;
-`--agy-bin /path/to/agy` (or `MAPLY_AGY_BIN`) overrides executable discovery.
-`--once` processes at most one image; `--max-tasks 2` runs a bounded pilot.
+For diagnostics, `/api/capture/runs/RUN_UUID/events` returns the latest 100 model
+assessment records. The worker makes no paid calls until it has a running run
+and a claimed shot. Automated tests simulate desktop/model IO and use the test
+database; they do not drive Street View or spend API credits.
 
-Choose **Parallel sessions** in the tagging sidebar or **Activity** panel and
-press **Apply** to run 1–20 images at once. The default is 1. This setting persists
-and applies across all jobs and worker processes. The running manager notices
-changes within a few seconds; increasing it starts more queued work, while
-reducing it lets existing sessions finish before starting more. Postgres enforces
-the cap atomically, so competing sessions cannot claim the same image or exceed
-the selected limit. Twenty is Maply's current application limit, not a claimed
-Antigravity account entitlement. Sessions share your account allowance.
+## 3. Tag captured images with OpenRouter
 
-One manager performs model discovery and quota refresh for all its sessions.
-`--max-tasks` limits the total number of images across those sessions, while
-`--once` always processes at most one. Stopping the manager with Ctrl+C stops new
-claims and lets active sessions save their results before exiting.
+Open **Model settings** and save an OpenRouter key plus a standalone tagging model.
+The default is `google/gemini-3.1-flash-lite`. The app processes queued tagging work
+itself: no separate tagging terminal, local model login or CLI installation is needed.
+The key stays in `data/provider-settings.json` with owner-only permissions and is
+excluded from Git. Existing keys and model preferences are preserved during upgrade.
+
+Automatic capture asks for the capture decision and full accessibility tags in
+one response for the final view. A `wait`, `drag` or `pass` response has no tags.
+A successful save validates the labels against the existing tagging vocabulary,
+binds them to the exact saved image checksum, writes label JSON, and marks tagging
+complete. It does not enqueue another tagging call. If annotation validation fails,
+the good photo is retained and queued for standalone OpenRouter tagging; these
+separate retries use the standalone model and are billed outside the capture run's
+request/cost limits. Unknown observations remain unknown, rather than being forced
+through a correction prompt.
+
+Use **Parallel sessions** to select 1–20 standalone OpenRouter requests at once.
+The setting applies across jobs, is enforced atomically in Postgres, and lets
+active requests finish when reduced. Requests use your OpenRouter credits.
+Model changes apply when the next photo is claimed; running requests keep their
+original model. To prevent the app-managed tagger from starting, set
+`TAGGING_AUTOSTART=false` (also useful for isolated tests).
+
+### Manual backlog
+
+The model can `pass` whenever it cannot make a confident call. Ambiguous camera
+views are placed in **Manual backlog** without claiming a successful capture.
+Saved images with uncertain tags or review reasons remain saved with their
+validated observations and appear in the same backlog. The backlog counter and
+Photos filter use a shared server-side condition, so the photo gallery, capture
+worker and extension agree on what needs human attention.
+
+Click **Review backlog** in a job to inspect the photo, last-view evidence and
+reason. The existing **Looks right**, **Needs a retake** and **Undo** controls
+resolve its backlog entry; a retake returns it to pending capture. In the Chrome
+extension, choose **Only manual review backlog** to step through those views by
+hand. Saving a view, or explicitly marking no imagery/blocked, resolves that entry.
+Skipping leaves it in the backlog. Automatic capture does not reclaim backlog
+photos unless you explicitly return them to capture. Reload the extension and
+its Maps tab after this upgrade.
+
+### Caching
+
+Capture instructions and tagging vocabulary share a stable prompt prefix; the
+per-shot camera context follows it. One OpenRouter session ID groups a capture
+run without carrying previous images in a growing conversation. Matching prefix
+caching is provider/model dependent and is not guaranteed by the session ID.
+Capture assessment events record cache read/write token counts when reported.
+The combined request avoids a duplicate image analysis call even without a cache
+hit. Switching models does not preserve cached tokens across models.
 
 In a job:
 
@@ -180,51 +279,10 @@ In a job:
    outcomes. Open or cancel individual queued images here. Activity is streamed
    from the server, with polling as a fallback; elapsed time is not an ETA.
 
-The activity panel also shows the account allowance returned by Antigravity's
-supported `/usage` command: remaining percentage per model group/window, reset
-time and when it was checked. The host worker refreshes this in the background
-at most every five minutes. Unavailable values are shown as unavailable; image
-capacity is not estimated from token allowances. These limits are shared with
-other usage of the same account.
-
-An image's high-level confidence is the mean of its known observation scores,
-including footpath presence and all feature tags. Unknowns are excluded from
-that mean and counted separately; an entirely unknown image has no score.
-Street/job confidence is the mean of the scored image means, so images with more
-tags do not dominate. Cards also show the lowest tag score, unknown counts and
-tagged-image coverage. Scores describe model certainty, not accessibility or
-measured accuracy. Existing valid results receive these summaries automatically.
-
-Only provider tool/status events, numeric token usage and a preview of the
-returned annotation are exposed. Raw tool arguments and internal reasoning are
-not logged to the activity panel. Events persist per task attempt; retries show
-the current attempt. The full annotation is accepted only after validation.
-
-**Retry failed / cancelled** queues unsuccessful selected images and any still
-unlabelled images. **Cancel selected work** invalidates queued/running results;
-an in-flight CLI call may finish, but its result will not be applied. Pending
-work survives app restarts. A disconnected worker's running task becomes failed
-after its five-minute lease expires; retry it explicitly. Authentication, quota,
-validation and timeout errors are shown rather than counted as completed.
-The worker validates annotations before submission. An invalid annotation gets
-one correction attempt using the same image and the specific validation errors
-(at most two model calls per task). If correction fails, the image stays failed
-with the reason shown; invalid or contradictory labels are never accepted.
-
-The schema covers footpath presence, separate surface sections, driveway
-pedestrian crossings and both joins, kerb ramps and crossing context, slopes,
-clearance and local hazards. Every known tag has a model-reported confidence
-between 0 and 1 and a visual explanation. Unknown tags have null confidence and
-an explanation. Confidence is **not calibrated accuracy**. Absent footpaths stop
-detail tagging; obscured areas remain unknown. Camera coordinates are never
-presented as precise feature coordinates. Unknowns, low confidence and potential
-route barriers are flagged for review, even when analysis completed successfully.
-
-Results are linked to the image SHA256. Changed images cannot receive an old
-in-flight result, and stale labels are excluded from display/export. Successful
-attempts are also saved under `data/jobs/<job>/labels/` with their model, imagery
-date, tagging date and source hash. **Write dataset file** includes current labels
-and queue state in the export.
+Activity shows queued/running/completed/failed work, validation evidence and token
+usage. Cancelled or replaced tasks cannot apply stale results. Pending work and
+manual review survive app restarts. Retakes invalidate annotations for old image
+checksums. Confidence is model-reported, not calibrated or an accessibility guarantee.
 
 ## 4. Use the dataset
 

@@ -151,6 +151,7 @@
     if (msg.type === 'show') { if (panel) panel.style.visibility = ''; reply(true); return; }
     if (msg.type === 'info') { reply({ url: location.href }); return; }
     if (msg.type === 'error') { if (state) { state.error = msg.message; render(); } reply(true); return; }
+    if (msg.type === 'progress') { if (state) { state.progress = msg.progress; render(); } reply(true); return; }
     if (msg.type === 'finished') { if (state) { state.shot = null; state.progress = msg.progress; render(); } reply(true); return; }
     if (msg.type === 'stopped') { state = null; panel?.remove(); panel = null; reply(true); return; }
     reply(null);
@@ -161,6 +162,8 @@
     if (!s?.active) return;
     state = s;
     render();
+    setInterval(() => { if (state) send({ type: 'refresh' }); }, 15000);
+    send({ type: 'refresh' });
     let last = location.href;
     setInterval(() => { if (location.href !== last) { last = location.href; updateLive(); } }, 250);
   })();

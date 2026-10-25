@@ -85,9 +85,9 @@ export function TaggingPanel({ jobId, summary, error, loading, busy, selectedSeg
         <div className="tag-counts"><span>{summary.counts.queued} queued</span><span>{summary.counts.running} running</span><span>{summary.counts.failed} failed</span><span>{summary.counts.needs_review} need review</span>{summary.counts.cancelled > 0 && <span>{summary.counts.cancelled} cancelled</span>}</div>
       </div>
       <div className={`worker-state ${summary.worker.online ? 'worker-online' : ''}`}>
-        <strong><i />{summary.worker.online ? 'Vision worker connected' : 'Vision worker offline'}</strong>
+        <strong><i />{summary.worker.online ? 'OpenRouter tagging ready' : 'OpenRouter tagging starting'}</strong>
         <span>{summary.worker.model || summary.model}</span>
-        {!summary.worker.online && <><p>Queued images wait until the worker starts on your Mac.</p><code>cd backend &amp;&amp; uv run python ../scripts/tag_worker.py</code></>}
+        {!summary.worker.online && <p>Queued photos are processed by the app when an OpenRouter key is configured.</p>}
         {summary.worker.error && <p className="error">{summary.worker.error}</p>}
       </div>
       {activity}
@@ -139,7 +139,7 @@ export function TagResults({ shot, busy, onQueue, focusedFeature, onFocus }: { s
   return <section className="tag-results" aria-label="Image tagging results">
     <div className="tag-heading"><h3>Accessibility observations</h3><span className={`tag-badge tag-${status}`}>{words(status)}</span></div>
     {shot.tagging?.error && <p className="error" role="alert">{shot.tagging.error}</p>}
-    {shot.image_url && ['captured', 'accepted', 'needs_check'].includes(shot.status) && status !== 'completed' && <button className="btn btn-primary" disabled={busy || status === 'queued' || status === 'running'} onClick={onQueue}>{status === 'queued' ? 'Waiting for vision worker…' : status === 'running' ? 'Analysing image…' : status === 'failed' || status === 'cancelled' ? 'Retry image tagging' : 'Tag this image'}</button>}
+    {shot.image_url && ['captured', 'accepted', 'needs_check'].includes(shot.status) && status !== 'completed' && <button className="btn btn-primary" disabled={busy || status === 'queued' || status === 'running'} onClick={onQueue}>{status === 'queued' ? 'Queued for OpenRouter…' : status === 'running' ? 'Analysing image…' : status === 'failed' || status === 'cancelled' ? 'Retry image tagging' : 'Tag this image'}</button>}
     {labels ? <>
       <ConfidenceCard confidence={shot.confidence ?? imageConfidence(labels)} />
       {labels.provenance?.imagery_date && <p className="fineprint">Imagery date: {labels.provenance.imagery_date}</p>}

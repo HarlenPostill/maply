@@ -2,7 +2,7 @@
 // Owns the capture session (stored in chrome.storage so it survives restarts),
 // talks to the local maply app, captures the tab and moves to the next shot.
 
-const DEFAULTS = { server: 'http://127.0.0.1:8000', quality: 92, includeSkipped: false };
+const DEFAULTS = { server: 'http://127.0.0.1:8000', quality: 92, includeSkipped: false, backlogOnly: false };
 let busy = false;
 
 async function settings() {
@@ -40,6 +40,7 @@ async function open(data, { remember = true } = {}) {
   if (!s) return;
   if (remember && s.shot) s.history = [...(s.history || []).slice(-99), s.shot.id];
   s.shot = data.shot;
+  s.reviewing = false;
   s.progress = data.progress;
   s.last = data.saved || null;
   await setSession(s);
@@ -50,10 +51,26 @@ async function open(data, { remember = true } = {}) {
   }
 }
 
+// Refresh shared progress and preserve the selected manual queue.
+async function refresh() {
+  const s = await getSession();
+  if (!s?.running) return false;
+  const { includeSkipped, backlogOnly } = await settings();
+  const data = await api(`/api/ext/next?job_id=${s.jobId}&include_skipped=${includeSkipped}&backlog_only=${!!backlogOnly}${s.shot ? `&current=${s.shot.id}` : ''}`);
+  if (!s.reviewing && data.shot?.id !== s.shot?.id) {
+    await open(data, { remember: false });
+    return true;
+  }
+  s.progress = data.progress;
+  await setSession(s);
+  await tell(s.tabId, { type: 'progress', progress: data.progress });
+  return false;
+}
+
 async function start(jobId) {
-  const { includeSkipped } = await settings();
+  const { includeSkipped, backlogOnly } = await settings();
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  const data = await api(`/api/ext/next?job_id=${jobId}&after=0&include_skipped=${includeSkipped}`);
+  const data = await api(`/api/ext/next?job_id=${jobId}&after=0&include_skipped=${includeSkipped}&backlog_only=${!!backlogOnly}`);
   const target = tab && !tab.url?.startsWith('chrome') ? tab : await chrome.tabs.create({ url: 'about:blank' });
   await setSession({ jobId, job: data.job, tabId: target.id, windowId: target.windowId, shot: null, history: [], running: true });
   await open(data, { remember: false });
@@ -84,20 +101,21 @@ async function withLock(fn) {
 
 async function save() {
   await withLock(async () => {
+    if (await refresh()) return;
     const s = await getSession();
     if (!s?.running || !s.shot) return;
     const [visible] = await chrome.tabs.query({ active: true, windowId: s.windowId });
     if (visible?.id !== s.tabId) throw new Error('Switch back to the capture tab first. Only the visible tab can be saved.');
     const page = await tell(s.tabId, { type: 'prepare' }); // hides the panel, returns URL + on-screen date
     if (!page) throw new Error('This tab is not showing the Street View page yet.');
-    const { quality, includeSkipped } = await settings();
+    const { quality, includeSkipped, backlogOnly } = await settings();
     let image;
     try {
       image = await chrome.tabs.captureVisibleTab(s.windowId, { format: 'jpeg', quality });
     } finally {
       await tell(s.tabId, { type: 'show' });
     }
-    const data = await api(`/api/ext/capture?include_skipped=${includeSkipped}`, {
+    const data = await api(`/api/ext/capture?include_skipped=${includeSkipped}&backlog_only=${!!backlogOnly}`, {
       shot_id: s.shot.id,
       image,
       page_url: page.url,
@@ -111,11 +129,12 @@ async function save() {
 
 async function mark(status) {
   await withLock(async () => {
+    if (await refresh()) return;
     const s = await getSession();
     if (!s?.running || !s.shot) return;
     const page = await tell(s.tabId, { type: 'info' });
-    const { includeSkipped } = await settings();
-    const data = await api(`/api/ext/mark?include_skipped=${includeSkipped}`, { shot_id: s.shot.id, status, page_url: page?.url || null });
+    const { includeSkipped, backlogOnly } = await settings();
+    const data = await api(`/api/ext/mark?include_skipped=${includeSkipped}&backlog_only=${!!backlogOnly}`, { shot_id: s.shot.id, status, page_url: page?.url || null });
     await open(data);
   });
 }
@@ -127,6 +146,9 @@ async function back() {
     const prev = s.history.pop();
     await setSession(s);
     await open(await api(`/api/ext/shot/${prev}`), { remember: false });
+    const updated = await getSession();
+    updated.reviewing = true;
+    await setSession(updated);
   });
 }
 
@@ -137,6 +159,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       case 'hello': // a Maps page loaded: show the panel only in the capture tab
         reply(s && s.running && sender.tab?.id === s.tabId ? { active: true, shot: s.shot, progress: s.progress, job: s.job, last: s.last, canGoBack: !!s.history?.length } : { active: false });
         return;
+      case 'refresh':
+        if (s?.running && sender.tab?.id === s.tabId) await withLock(refresh);
+        return reply(true);
       case 'save': return reply(await save());
       case 'mark': return reply(await mark(msg.status));
       case 'back': return reply(await back());

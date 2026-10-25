@@ -16,7 +16,6 @@ from PIL import Image  # noqa: E402
 
 from app.geo.projection import geodesic_distance, side_of_heading  # noqa: E402
 from app.geo.streetview_url import parse_streetview_url  # noqa: E402
-from app.prompts import build_prompt  # noqa: E402
 from app.results import evaluate  # noqa: E402
 from app.shots import JobOptions, plan_shots  # noqa: E402
 
@@ -68,15 +67,9 @@ def test_divided_roads_photograph_only_the_footpath_beside_each_carriageway():
     assert all(old[s.code] == (s.lat, s.lng, s.heading, s.footpath) for s in near)
 
 
-def test_batches_and_prompt_contents():
+def test_planner_batches_remain_stable_for_existing_jobs():
     shots, *_ = plan_shots(GEORGE, JobOptions(spacing_m=15, batch_size=5))
     assert max(s.batch for s in shots) == (len(shots) - 1) // 5 + 1
-    batch1 = [s for s in shots if s.batch == 1]
-    text = build_prompt(job_name="George St", slug="george-st", shots=batch1, label="batch 1 of 3", log_name="batch-01.jsonl", total=len(shots))
-    for s in batch1:
-        assert s.url in text and f"images/{s.filename}" in text and s.code in text
-    assert "/jobs/george-st" in text and "results/batch-01.jsonl" in text and "final_url" in text
-    assert "computer use" in text and "screencapture" in text
 
 
 def _png(path: Path, w=1280, h=800):

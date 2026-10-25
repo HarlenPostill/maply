@@ -246,13 +246,12 @@ export default function NewJob({ status, setMap, onCancel, onCreated }: Props) {
           <span>On divided roads, photograph each footpath only from the side of the road it's on</span>
         </label>
 
-        <button type="button" className="disclosure" aria-expanded={more} onClick={() => setMore(!more)}>Camera and prompt options</button>
+        <button type="button" className="disclosure" aria-expanded={more} onClick={() => setMore(!more)}>Camera options</button>
         {more && (
           <div className="more">
             <label className="field"><span>Camera tilt</span><span className="input-unit"><input type="number" min={-40} max={20} value={opts.pitch} onChange={(e) => set('pitch', Number(e.target.value))} /><span>°</span></span></label>
             <label className="field"><span>Field of view</span><span className="input-unit"><input type="number" min={30} max={100} value={opts.fov} onChange={(e) => set('fov', Number(e.target.value) || 80)} /><span>°</span></span></label>
-            <label className="field"><span>Photos per prompt</span><span className="input-unit"><input type="number" min={5} max={100} value={opts.batch_size} onChange={(e) => set('batch_size', Number(e.target.value) || 20)} /></span></label>
-            <p className="fineprint">Negative tilt looks down toward the kerb. Smaller prompts are easier for Codex to finish in one go.</p>
+            <p className="fineprint">Negative tilt looks down toward the kerb.</p>
           </div>
         )}
 

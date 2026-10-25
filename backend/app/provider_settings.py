@@ -8,11 +8,9 @@ import threading
 
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
-from typing import Literal
 import httpx
 
 from app.config import get_settings
-from app.vision_provider import DEFAULT_MODEL
 
 router = APIRouter(prefix='/api/tagging/provider')
 _lock = threading.Lock()
@@ -21,22 +19,18 @@ DEFAULT_OPENROUTER_MODEL = 'google/gemini-3.1-flash-lite'
 
 def load_settings() -> dict:
     path = get_settings().data_root / 'provider-settings.json'
-    if not path.exists():
-        return {'provider': 'antigravity', 'antigravity_model': DEFAULT_MODEL,
-                'openrouter_model': DEFAULT_OPENROUTER_MODEL, 'api_key': '', 'configured': False}
-    return json.loads(path.read_text())
+    raw = json.loads(path.read_text()) if path.exists() else {}
+    # Read older preference files without retaining removed local-provider settings.
+    return {'provider': 'openrouter', 'openrouter_model': raw.get('openrouter_model', DEFAULT_OPENROUTER_MODEL),
+            'api_key': raw.get('api_key', ''), 'configured': bool(raw.get('api_key'))}
 
 
 def public_settings(value: dict) -> dict:
-    return {key: value[key] for key in ('provider', 'antigravity_model', 'openrouter_model')} | {
-        'api_key_configured': bool(value.get('api_key')),
-    }
+    return {'openrouter_model': value['openrouter_model'], 'api_key_configured': bool(value.get('api_key'))}
 
 
 class ProviderUpdate(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
-    provider: Literal['antigravity', 'openrouter']
-    antigravity_model: str = Field(min_length=1, max_length=100, pattern=r'^\S+$')
     openrouter_model: str = Field(min_length=1, max_length=100, pattern=r'^[^\s/]+/[^\s]+$')
     api_key: SecretStr | None = None
     clear_api_key: bool = False
@@ -60,8 +54,6 @@ def update_provider(req: ProviderUpdate, response: Response):
             value['api_key'] = ''
         elif key:
             value['api_key'] = key
-        if value['provider'] == 'openrouter' and not value.get('api_key'):
-            raise HTTPException(422, 'Enter an OpenRouter API key before selecting OpenRouter.')
         value['configured'] = True
         root = get_settings().data_root
         root.mkdir(parents=True, exist_ok=True)

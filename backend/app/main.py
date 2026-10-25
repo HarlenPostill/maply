@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from contextlib import asynccontextmanager
 import binascii
 import hashlib
 import io
@@ -24,7 +26,7 @@ from sqlalchemy import BigInteger, func, insert, select
 from sqlalchemy.orm import Session, defer
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app import dataset, osm, prompts, results, tagging, provider_settings
+from app import dataset, osm, results, tagging, provider_settings, capture, backlog
 from app.config import get_settings
 from app.db import get_db
 from app.geo.planning import PlanningError
@@ -34,13 +36,25 @@ from app.shots import JobOptions, plan_shots, slugify, write_job_folder
 settings = get_settings()
 settings.jobs_dir.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="maply", version="0.3.0", docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
+@asynccontextmanager
+async def lifespan(app):
+    from app.openrouter_worker import serve
+    stop = asyncio.Event()
+    worker = asyncio.create_task(serve(stop)) if settings.tagging_autostart else None
+    yield
+    stop.set()
+    if worker:
+        await worker
+
+
+app = FastAPI(lifespan=lifespan, title="maply", version="0.3.0", docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=[h.strip() for h in os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost,testserver").split(",") if h.strip()],
 )
 app.include_router(tagging.router)
 app.include_router(provider_settings.router)
+app.include_router(capture.router)
 
 SCOPE = MultiPolygon([shape(f["geometry"]) for f in json.loads(settings.scope_geojson_path.read_text())["features"]])
 DONE = ("captured", "accepted", "no_imagery", "blocked", "needs_check")
@@ -105,13 +119,17 @@ def _counts(s: Session, jid) -> dict:
     c = {k: n for k, n in s.execute(select(Shot.status, func.count()).where(Shot.job_id == jid).group_by(Shot.status)).all()}
     c["total"] = sum(c.values())
     c["done"] = sum(c.get(k, 0) for k in DONE)
+    c["manual_review"] = s.scalar(select(func.count()).select_from(Shot).where(Shot.job_id == jid, backlog.pending_review()))
     return c
 
 
 def _shot_dict(sh: Shot, slug: str, include_labels: bool = True) -> dict:
     r = sh.result or {}
     v = r.get("sha256") or int(r.get("saved_at") or 0)
+    evidence = settings.jobs_dir / slug / 'capture-review' / f'{sh.id}.jpg'
+    review_image = f'/api/capture/review/{sh.id}/image' if 'manual_review' in (sh.flags or []) and evidence.is_file() else None
     return {
+        "review_image_url": review_image,
         "id": str(sh.id), "code": sh.code, "ordinal": sh.ordinal, "batch": sh.batch, "street": sh.street, "kind": sh.kind,
         "side": sh.side, "footpath": sh.footpath, "view_kind": sh.view_kind, "lat": sh.lat, "lng": sh.lng, "heading": sh.heading,
         "pitch": sh.pitch, "fov": sh.fov, "url": sh.url, "filename": sh.filename, "status": sh.status, "flags": sh.flags,
@@ -288,6 +306,7 @@ def list_shots(
     side: str | None = Query(None, pattern="^(left|right|none)$"),
     tagging_status: str | None = Query(None, pattern="^(unlabelled|queued|running|completed|failed|cancelled)$"),
     include_labels: bool = True,
+    manual_backlog: bool = False,
     batch: int | None = None,
     order: str = Query("ordinal", pattern="^(ordinal|recent)$"),
     offset: int = 0,
@@ -296,6 +315,8 @@ def list_shots(
 ):
     j = _job(s, jid)
     q = select(Shot).where(Shot.job_id == jid)
+    if manual_backlog:
+        q = q.where(backlog.pending_review())
     if bbox:
         w, so, e, n = (float(v) for v in bbox.split(","))
         q = q.where(Shot.geom.intersects(func.ST_MakeEnvelope(w, so, e, n, 4326)))
@@ -329,10 +350,11 @@ def get_shot(sid: uuid.UUID, s: Session = Depends(get_db)):
 
 @app.patch("/api/shots/{sid}")
 def update_shot(sid: uuid.UUID, req: ShotUpdate, s: Session = Depends(get_db)):
-    sh = s.get(Shot, sid)
+    sh = _manual_shot(s, sid)
     if sh is None:
         raise HTTPException(404, "Shot not found")
     if req.status:
+        backlog.resolve(s, sh)
         sh.status = req.status
     if req.note is not None:
         sh.note = req.note
@@ -351,37 +373,22 @@ def delete_job(jid: uuid.UUID, delete_files: bool = False, s: Session = Depends(
 
 
 # --------------------------------------------------------------------------
-# Codex prompts and folder checks
+# Legacy file reconciliation
 # --------------------------------------------------------------------------
-
-
-@app.get("/api/jobs/{jid}/prompt")
-def get_prompt(jid: uuid.UUID, batch: int | None = None, remaining: bool = False, s: Session = Depends(get_db)):
-    """Prompt for one batch, or for the next shots still needing a photo (`remaining=true`)."""
-    j = _job(s, jid)
-    q = select(Shot).where(Shot.job_id == j.id).order_by(Shot.ordinal)
-    total = s.execute(select(func.count()).select_from(Shot).where(Shot.job_id == j.id)).scalar_one()
-    batches = s.execute(select(func.max(Shot.batch)).where(Shot.job_id == j.id)).scalar() or 1
-    if remaining:
-        shots = s.execute(q.where(Shot.status.in_(("pending", "retake", "needs_check"))).limit(j.batch_size)).scalars().all()
-        label, log = "missing photos", f"missing-{datetime.now(timezone.utc):%Y%m%d-%H%M}.jsonl"
-    else:
-        b = batch or 1
-        shots = s.execute(q.where(Shot.batch == b)).scalars().all()
-        label, log = f"prompt {b} of {batches}", f"prompt-{b:02d}.jsonl"
-    data = [{"code": x.code, "url": x.url, "filename": x.filename, "look": (x.result or {}).get("look", "")} for x in shots]
-    text_ = prompts.build_prompt(job_name=j.name, slug=j.slug, shots=data, label=label, log_name=log, total=total) if data else ""
-    if text_:
-        p = settings.jobs_dir / j.slug / "prompts" / log.replace(".jsonl", ".txt")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text_)
-    return {"text": text_, "shots": [d["code"] for d in data], "label": label, "log_file": f"results/{log}", "batches": batches}
 
 
 @app.post("/api/jobs/{jid}/check")
 def check(jid: uuid.UUID, s: Session = Depends(get_db)):
-    """Match files Codex saved (and its logs) to shots. Unchanged files are not re-read."""
+    """Reconcile historical image files and capture metadata with shots. Unchanged files are not re-read."""
     j = _job(s, jid)
+    changed, unknown = _check_files(s, j)
+    out = _job_dict(s, j, full=True)
+    out.update(unknown_log_entries=unknown, changed=changed)
+    return out
+
+
+def _check_files(s: Session, j: Job, *, unfinished_only: bool = False):
+    """Import disk results into the shared progress used by prompts and Chrome."""
     root = settings.jobs_dir / j.slug
     logs = results.read_logs(root / "results")
     bearings = dict(s.execute(select(Segment.key, Segment.bearing_deg).where(Segment.job_id == j.id)).all())
@@ -392,7 +399,9 @@ def check(jid: uuid.UUID, s: Session = Depends(get_db)):
             for nm in names:
                 codes_with_files.add(nm.split("_")[0].rsplit(".", 1)[0])
     changed, known = 0, set()
-    q = select(Shot).where(Shot.job_id == j.id).execution_options(yield_per=2000)
+    q = select(Shot).where(Shot.job_id == j.id, ~capture.reserved_shot()).execution_options(yield_per=2000)
+    if unfinished_only:
+        q = q.where(Shot.status.in_(TO_TAKE), Shot.code.in_(codes_with_files | set(logs)))
     for sh in s.execute(q).scalars():
         known.add(sh.code)
         if sh.code not in codes_with_files and sh.code not in logs and not (sh.result or {}).get("file"):
@@ -402,15 +411,13 @@ def check(jid: uuid.UUID, s: Session = Depends(get_db)):
         res["look"] = (sh.result or {}).get("look", "")
         if status_ in ("captured", "needs_check") and sh.captured_at is None:
             sh.captured_at = datetime.fromtimestamp(res.get("saved_at") or datetime.now().timestamp(), timezone.utc)
-            sh.capture_source = sh.capture_source or "codex"
+            sh.capture_source = sh.capture_source or "legacy"
         sh.status, sh.flags, sh.result = status_, flags, res
         changed += before != (status_, flags)
-    j.checked_at = datetime.now(timezone.utc)
+    if changed or not unfinished_only:
+        j.checked_at = datetime.now(timezone.utc)
     s.commit()
-    out = _job_dict(s, j, full=True)
-    out["unknown_log_entries"] = sorted(k for k in logs if k not in known)
-    out["changed"] = changed
-    return out
+    return changed, sorted(k for k in logs if k not in known)
 
 
 @app.post("/api/jobs/{jid}/dataset")
@@ -423,9 +430,11 @@ def export_dataset(jid: uuid.UUID, s: Session = Depends(get_db)):
 # --------------------------------------------------------------------------
 
 
-def _next_shot(s: Session, jid, after: int, include_skipped: bool) -> Shot | None:
-    wanted = TO_TAKE + (("skipped",) if include_skipped else ())
-    q = select(Shot).where(Shot.job_id == jid, Shot.status.in_(wanted))
+def _next_shot(s: Session, jid, after: int, include_skipped: bool, backlog_only: bool = False) -> Shot | None:
+    wanted = TO_TAKE + (("skipped", "needs_check") if backlog_only else (("skipped",) if include_skipped else ()))
+    q = select(Shot).where(Shot.job_id == jid, Shot.status.in_(wanted), ~capture.reserved_shot())
+    if backlog_only:
+        q = q.where(backlog.pending_review())
     nxt = s.execute(q.where(Shot.ordinal > after).order_by(Shot.ordinal).limit(1)).scalar_one_or_none()
     return nxt or s.execute(q.order_by(Shot.ordinal).limit(1)).scalar_one_or_none()
 
@@ -435,9 +444,17 @@ def _ext_payload(s: Session, j: Job, shot: Shot | None, **extra) -> dict:
 
 
 @app.get("/api/ext/next", dependencies=[Depends(_extension)])
-def ext_next(job_id: uuid.UUID, after: int = 0, include_skipped: bool = False, s: Session = Depends(get_db)):
+def ext_next(job_id: uuid.UUID, after: int = 0, include_skipped: bool = False,
+             current: uuid.UUID | None = None, backlog_only: bool = False, s: Session = Depends(get_db)):
     j = _job(s, job_id)
-    return _ext_payload(s, j, _next_shot(s, j.id, after, include_skipped))
+    shot = s.get(Shot, current) if current else None
+    if shot is not None and shot.job_id == j.id:
+        in_backlog = bool(s.scalar(select(Shot.id).where(Shot.id == shot.id, backlog.pending_review())))
+        eligible_current = in_backlog if backlog_only else (shot.status in TO_TAKE or (include_skipped and shot.status == "skipped"))
+        if eligible_current and not s.scalar(select(Shot.id).where(Shot.id == shot.id, capture.reserved_shot())):
+            return _ext_payload(s, j, shot)
+        after = shot.ordinal
+    return _ext_payload(s, j, _next_shot(s, j.id, after, include_skipped, backlog_only))
 
 
 @app.get("/api/ext/shot/{sid}", dependencies=[Depends(_extension)])
@@ -449,7 +466,25 @@ def ext_shot(sid: uuid.UUID, s: Session = Depends(get_db)):
 
 
 @app.post("/api/ext/capture", dependencies=[Depends(_extension)])
-def ext_capture(req: CaptureRequest, include_skipped: bool = False, s: Session = Depends(get_db)):
+def ext_capture(req: CaptureRequest, include_skipped: bool = False, backlog_only: bool = False, s: Session = Depends(get_db)):
+    sh = _manual_shot(s, req.shot_id)
+    out = _save_capture(req, include_skipped, s, commit=False, backlog_only=backlog_only)
+    backlog.resolve(s, sh)
+    s.commit()
+    # Resolve the backlog before selecting its next photo.
+    out['shot'] = _shot_dict(nxt, s.get(Job, sh.job_id).slug) if (nxt := _next_shot(s, sh.job_id, sh.ordinal, include_skipped, backlog_only)) else None
+    out['progress'] = _counts(s, sh.job_id)
+    return out
+
+
+def _manual_shot(s, sid):
+    sh = s.scalar(select(Shot).where(Shot.id == sid).with_for_update())
+    if sh and s.scalar(select(Shot.id).where(Shot.id == sid, capture.reserved_shot())):
+        raise HTTPException(409, "Photo reserved by a capture worker; pause the worker and wait for its lease to expire")
+    return sh
+
+
+def _save_capture(req: CaptureRequest, include_skipped: bool, s: Session, *, commit: bool = True, backlog_only: bool = False):
     sh = s.get(Shot, req.shot_id)
     if sh is None:
         raise HTTPException(404, "Shot not found")
@@ -483,22 +518,27 @@ def ext_capture(req: CaptureRequest, include_skipped: bool = False, s: Session =
     sh.status = "needs_check" if results.SERIOUS & set(flags) else "captured"
     sh.captured_at = datetime.now(timezone.utc)
     sh.capture_source = "extension"
-    s.commit()
+    if commit:
+        s.commit()
+    else:
+        s.flush()
     saved = {"code": sh.code, "status": sh.status, "flags": flags, "camera_offset_m": cres.get("camera_offset_m"), "heading_delta": cres.get("heading_delta")}
-    return _ext_payload(s, j, _next_shot(s, j.id, sh.ordinal, include_skipped), saved=saved)
+    return _ext_payload(s, j, _next_shot(s, j.id, sh.ordinal, include_skipped, backlog_only), saved=saved)
 
 
 @app.post("/api/ext/mark", dependencies=[Depends(_extension)])
-def ext_mark(req: MarkRequest, include_skipped: bool = False, s: Session = Depends(get_db)):
-    sh = s.get(Shot, req.shot_id)
+def ext_mark(req: MarkRequest, include_skipped: bool = False, backlog_only: bool = False, s: Session = Depends(get_db)):
+    sh = _manual_shot(s, req.shot_id)
     if sh is None:
         raise HTTPException(404, "Shot not found")
     j = s.get(Job, sh.job_id)
+    if req.status != "skipped":
+        backlog.resolve(s, sh)
     sh.status = req.status
     if req.page_url:
         sh.result = {**(sh.result or {}), "marked_at_url": req.page_url}
     s.commit()
-    return _ext_payload(s, j, _next_shot(s, j.id, sh.ordinal, include_skipped), saved={"code": sh.code, "status": sh.status, "flags": []})
+    return _ext_payload(s, j, _next_shot(s, j.id, sh.ordinal, include_skipped, backlog_only), saved={"code": sh.code, "status": sh.status, "flags": []})
 
 
 # --------------------------------------------------------------------------

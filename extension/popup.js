@@ -1,11 +1,12 @@
 const $ = (id) => document.getElementById(id);
-const DEFAULTS = { server: 'http://127.0.0.1:8000', quality: 92, includeSkipped: false, jobId: null };
+const DEFAULTS = { server: 'http://127.0.0.1:8000', quality: 92, includeSkipped: false, backlogOnly: false, jobId: null };
 
 async function load() {
   const cfg = { ...DEFAULTS, ...(await chrome.storage.local.get(Object.keys(DEFAULTS))) };
   $('server').value = cfg.server;
   $('quality').value = cfg.quality;
   $('skipped').checked = cfg.includeSkipped;
+  $('backlog').checked = cfg.backlogOnly;
 
   const session = await chrome.runtime.sendMessage({ type: 'session' });
   const running = !!session?.running;
@@ -29,8 +30,8 @@ async function load() {
   $('job').value = (running && session.jobId) || cfg.jobId || jobs[0].id;
   const show = () => {
     const j = jobs.find((x) => x.id === $('job').value);
-    const left = j.counts.total - j.counts.done;
-    $('progress').textContent = `${left.toLocaleString()} photos left${j.counts.skipped ? `, ${j.counts.skipped.toLocaleString()} skipped` : ''}.`;
+    const left = cfg.backlogOnly ? (j.counts.manual_review || 0) : j.counts.total - j.counts.done;
+    $('progress').textContent = `${left.toLocaleString()} ${cfg.backlogOnly ? "manual review photos" : "photos"} left${j.counts.skipped ? `, ${j.counts.skipped.toLocaleString()} skipped` : ''}.`;
   };
   show();
   $('job').onchange = () => { chrome.storage.local.set({ jobId: $('job').value }); show(); };
@@ -46,6 +47,7 @@ $('start').onclick = async () => {
 $('stop').onclick = async () => { await chrome.runtime.sendMessage({ type: 'stop' }); window.close(); };
 $('server').onchange = () => chrome.storage.local.set({ server: $('server').value.trim() || DEFAULTS.server }).then(load);
 $('quality').onchange = () => chrome.storage.local.set({ quality: Math.max(60, Math.min(100, Number($('quality').value) || 92)) });
+$('backlog').onchange = () => chrome.storage.local.set({ backlogOnly: $('backlog').checked }).then(load);
 $('skipped').onchange = () => chrome.storage.local.set({ includeSkipped: $('skipped').checked });
 $('shortcuts').onclick = (e) => { e.preventDefault(); chrome.tabs.create({ url: 'chrome://extensions/shortcuts' }); };
 
