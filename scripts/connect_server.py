@@ -1,4 +1,4 @@
-"""Open a private SSH connection to the permanent Maply server, without starting a local app."""
+"""Open an explicitly configured historical SSH tunnel on a separate local port."""
 import argparse
 import json
 from pathlib import Path
@@ -8,35 +8,43 @@ import time
 import urllib.request
 import webbrowser
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
 def ssh_arguments(config):
     host = config['host']
     if not host or host.startswith('-') or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._@:-' for c in host):
         raise ValueError('Invalid SSH destination')
-    local_port, remote_port = int(config.get('local_port', 8000)), int(config.get('remote_port', 8000))
+    local_port, remote_port = int(config.get('local_port', 18000)), int(config.get('remote_port', 8000))
     if not 1 <= local_port <= 65535 or not 1 <= remote_port <= 65535:
         raise ValueError('Invalid tunnel port')
-    return ['ssh', '-N', '-T', '-i', str(Path(config['identity_file']).expanduser()),
+    if local_port in {8000, 5173}:
+        raise ValueError(f'Port {local_port} is reserved for local development; use a separate tunnel port such as 18000.')
+    arguments = ['ssh', '-N', '-T', '-i', str(Path(config['identity_file']).expanduser()),
             '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
             '-o', 'ConnectTimeout=8', '-o', 'ExitOnForwardFailure=yes',
             '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
-            '-L', f'127.0.0.1:{local_port}:127.0.0.1:{remote_port}', host]
+            '-L', f'127.0.0.1:{local_port}:127.0.0.1:{remote_port}']
+    if config.get('desktop_local_port') is not None:
+        desktop_port = int(config['desktop_local_port'])
+        if not 1 <= desktop_port <= 65535 or desktop_port == local_port:
+            raise ValueError('Invalid desktop tunnel port')
+        if desktop_port in {8000, 5173}:
+            raise ValueError(f'Port {desktop_port} is reserved for local development.')
+        arguments += ['-L', f'127.0.0.1:{desktop_port}:127.0.0.1:5900']
+    return [*arguments, host]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=ROOT / 'data/client-server.json')
+    parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--no-open', action='store_true')
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
-    port = int(config.get('local_port', 8000))
+    arguments = ssh_arguments(config)
+    port = int(config.get('local_port', 18000))
     # An existing local app must never be mistaken for the authoritative server.
     with socket.socket() as probe:
         if probe.connect_ex(('127.0.0.1', port)) == 0:
-            raise SystemExit(f'Port {port} is already in use. If the Maply tunnel service is running, open http://127.0.0.1:{port}. Otherwise stop the local Maply app first.')
-    process = subprocess.Popen(ssh_arguments(config))
+            raise SystemExit(f'Port {port} is already in use. Choose another tunnel port.')
+    process = subprocess.Popen(arguments)
     try:
         url = f'http://127.0.0.1:{port}'
         for _ in range(30):

@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 
-function worker({ reviewing = false, next = 'next', backlogOnly = false } = {}) {
-  let session = { running: true, jobId: 'job', tabId: 7, shot: { id: 'old', url: 'old-url' }, reviewing };
+function worker({ reviewing = false, next = 'next', backlogOnly = false, targetCode = null } = {}) {
+  let session = { running: true, jobId: 'job', tabId: 7, shot: { id: 'old', url: 'old-url' }, reviewing, targetCode };
   const messages = [], navigations = [], requests = [];
   let captures = 0;
   const context = vm.createContext({
@@ -66,4 +66,13 @@ test('manual backlog mode is preserved when refreshing the capture queue', async
   await vm.runInContext('refresh()', w.context);
   assert.match(w.requests[0], /backlog_only=true/);
   assert.equal(w.session().shot.id, 'next');
+});
+
+test('targeted recovery finishes after its point instead of opening another point', async () => {
+  const w = worker({ targetCode: 'P04709-R1' });
+  await vm.runInContext('refresh()', w.context);
+  assert.equal(w.session().running, false);
+  assert.equal(w.session().shot, null);
+  assert.equal(w.messages[0].type, 'finished');
+  assert.deepEqual(w.navigations, []);
 });

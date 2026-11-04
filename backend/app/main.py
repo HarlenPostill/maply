@@ -26,7 +26,7 @@ from sqlalchemy import BigInteger, func, insert, select
 from sqlalchemy.orm import Session, defer
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app import dataset, osm, results, tagging, provider_settings, capture, backlog
+from app import dataset, osm, results, tagging, provider_settings, capture, backlog, review
 from app.config import get_settings
 from app.db import get_db
 from app.geo.planning import PlanningError
@@ -39,12 +39,15 @@ settings.jobs_dir.mkdir(parents=True, exist_ok=True)
 @asynccontextmanager
 async def lifespan(app):
     from app.openrouter_worker import serve
+    from app.review_worker import serve as serve_reviews
     stop = asyncio.Event()
     worker = asyncio.create_task(serve(stop)) if settings.tagging_autostart else None
+    review_worker = asyncio.create_task(serve_reviews(stop))
     yield
     stop.set()
     if worker:
         await worker
+    await review_worker
 
 
 app = FastAPI(lifespan=lifespan, title="maply", version="0.3.0", docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None)
@@ -55,6 +58,7 @@ app.add_middleware(
 app.include_router(tagging.router)
 app.include_router(provider_settings.router)
 app.include_router(capture.router)
+app.include_router(review.router)
 
 SCOPE = MultiPolygon([shape(f["geometry"]) for f in json.loads(settings.scope_geojson_path.read_text())["features"]])
 DONE = ("captured", "accepted", "no_imagery", "blocked", "needs_check")
@@ -445,8 +449,18 @@ def _ext_payload(s: Session, j: Job, shot: Shot | None, **extra) -> dict:
 
 @app.get("/api/ext/next", dependencies=[Depends(_extension)])
 def ext_next(job_id: uuid.UUID, after: int = 0, include_skipped: bool = False,
-             current: uuid.UUID | None = None, backlog_only: bool = False, s: Session = Depends(get_db)):
+             current: uuid.UUID | None = None, backlog_only: bool = False, code: str | None = None,
+             s: Session = Depends(get_db)):
     j = _job(s, job_id)
+    if code:
+        target = s.scalar(select(Shot).where(Shot.job_id == job_id, Shot.code == code.strip()))
+        if target is None:
+            raise HTTPException(404, "Photo code not found in this job")
+        if target.status not in TO_TAKE:
+            raise HTTPException(409, "Prepare this point for recapture in the review workspace first")
+        if s.scalar(select(Shot.id).where(Shot.id == target.id, capture.reserved_shot())):
+            raise HTTPException(409, "This point is reserved by a capture worker")
+        return _ext_payload(s, j, target)
     shot = s.get(Shot, current) if current else None
     if shot is not None and shot.job_id == j.id:
         in_backlog = bool(s.scalar(select(Shot.id).where(Shot.id == shot.id, backlog.pending_review())))
@@ -485,7 +499,7 @@ def _manual_shot(s, sid):
 
 
 def _save_capture(req: CaptureRequest, include_skipped: bool, s: Session, *, commit: bool = True, backlog_only: bool = False):
-    sh = s.get(Shot, req.shot_id)
+    sh = s.scalar(select(Shot).where(Shot.id == req.shot_id).with_for_update())
     if sh is None:
         raise HTTPException(404, "Shot not found")
     j = s.get(Job, sh.job_id)
@@ -510,6 +524,7 @@ def _save_capture(req: CaptureRequest, include_skipped: bool, s: Session, *, com
     flags, cres = results.camera_check(sh, req.page_url, req.image_date_text, seg_bearing)
     st = dest.stat()
     sh.result = {
+        **({"review_recovery": sh.result["review_recovery"]} if "review_recovery" in (sh.result or {}) else {}),
         **cres, "look": (sh.result or {}).get("look", ""), "file": str(dest.relative_to(root)), "thumb": str(thumb.relative_to(root)),
         "sha256": hashlib.sha256(data).hexdigest(), "width": w, "height": h, "format": fmt, "bytes": st.st_size, "saved_at": st.st_mtime,
         "device_pixel_ratio": req.device_pixel_ratio, "viewport": req.viewport,
@@ -544,6 +559,14 @@ def ext_mark(req: MarkRequest, include_skipped: bool = False, backlog_only: bool
 # --------------------------------------------------------------------------
 # Files and the built app
 # --------------------------------------------------------------------------
+
+
+@app.get("/assets/accessibility/{job_id}.json", include_in_schema=False)
+def accessibility_file(job_id: uuid.UUID):
+    path = settings.data_root / "accessibility" / f"{job_id}.json"
+    if not path.is_file():
+        raise HTTPException(404, "Accessibility snapshot not published yet")
+    return FileResponse(path, media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/files/{slug}/{rel:path}", include_in_schema=False)

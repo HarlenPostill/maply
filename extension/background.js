@@ -38,6 +38,10 @@ async function tell(tabId, msg) {
 async function open(data, { remember = true } = {}) {
   const s = await getSession();
   if (!s) return;
+  if (s.targetCode && s.shot && data.shot?.id !== s.shot.id) {
+    data = { ...data, shot: null };
+    s.running = false;
+  }
   if (remember && s.shot) s.history = [...(s.history || []).slice(-99), s.shot.id];
   s.shot = data.shot;
   s.reviewing = false;
@@ -67,12 +71,13 @@ async function refresh() {
   return false;
 }
 
-async function start(jobId) {
+async function start(jobId, code = '') {
+  if (code) await chrome.storage.local.set({ backlogOnly: false, includeSkipped: false });
   const { includeSkipped, backlogOnly } = await settings();
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  const data = await api(`/api/ext/next?job_id=${jobId}&after=0&include_skipped=${includeSkipped}&backlog_only=${!!backlogOnly}`);
+  const data = await api(`/api/ext/next?job_id=${jobId}&after=0&include_skipped=${includeSkipped}&backlog_only=${!!backlogOnly}${code ? `&code=${encodeURIComponent(code)}` : ''}`);
   const target = tab && !tab.url?.startsWith('chrome') ? tab : await chrome.tabs.create({ url: 'about:blank' });
-  await setSession({ jobId, job: data.job, tabId: target.id, windowId: target.windowId, shot: null, history: [], running: true });
+  await setSession({ jobId, job: data.job, tabId: target.id, windowId: target.windowId, shot: null, history: [], running: true, targetCode: code || null });
   await open(data, { remember: false });
   return data;
 }
@@ -167,7 +172,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       case 'back': return reply(await back());
       case 'stop': return reply(await stop());
       case 'start':
-        try { reply({ ok: true, data: await start(msg.jobId) }); } catch (e) { reply({ ok: false, error: e.message }); }
+        try { reply({ ok: true, data: await start(msg.jobId, msg.code) }); } catch (e) { reply({ ok: false, error: e.message }); }
         return;
       case 'session': return reply(s);
       case 'jobs':

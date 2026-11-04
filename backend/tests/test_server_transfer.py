@@ -69,12 +69,23 @@ def test_data_hash_verification_detects_changes(tmp_path):
 
 def test_ssh_client_binds_only_loopback_and_rejects_option_injection():
     client = module('connect_server')
-    cfg = {'host': 'user@192.168.0.249', 'identity_file': '/private/key', 'local_port': 8000}
+    cfg = {'host': 'user@192.168.0.249', 'identity_file': '/private/key', 'local_port': 18000}
     args = client.ssh_arguments(cfg)
-    assert args[-2:] == ['127.0.0.1:8000:127.0.0.1:8000', 'user@192.168.0.249']
+    assert args[-2:] == ['127.0.0.1:18000:127.0.0.1:8000', 'user@192.168.0.249']
     assert 'ExitOnForwardFailure=yes' in args
     with pytest.raises(ValueError):
         client.ssh_arguments({**cfg, 'host': '-oProxyCommand=anything'})
+
+
+@pytest.mark.parametrize('port', [8000, 5173])
+def test_ssh_tunnel_cannot_take_local_development_ports(port):
+    client = module('connect_server')
+    with pytest.raises(ValueError, match='reserved for local development'):
+        client.ssh_arguments({'host': 'example.com', 'identity_file': '/private/key',
+                              'local_port': port})
+    with pytest.raises(ValueError, match='reserved for local development'):
+        client.ssh_arguments({'host': 'example.com', 'identity_file': '/private/key',
+                              'local_port': 18000, 'desktop_local_port': port})
 
 
 def test_client_workspace_cannot_export_stale_progress(tmp_path):

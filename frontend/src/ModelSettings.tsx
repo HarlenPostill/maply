@@ -41,7 +41,7 @@ export default function ModelSettings() {
         openrouter_model: settings.openrouter_model.trim(), ...(key ? { api_key: key } : {}), clear_api_key: clearKey,
       });
       setSettings(value); setKey(''); setClearKey(false);
-      setMessage('Saved. The next queued photo will use this model.');
+      setMessage('Saved. New review batches will use this model. Existing batches keep their selected model.');
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
   }
@@ -53,13 +53,13 @@ export default function ModelSettings() {
     {open && <form onSubmit={save}>
       <h3>OpenRouter settings</h3>
       {settings ? <fieldset disabled={busy}>
-          <label>Standalone tagging model<input required list="openrouter-models" value={settings.openrouter_model} onChange={(e) => setSettings({ ...settings, openrouter_model: e.target.value })} placeholder="google/gemini-3.1-flash-lite" /></label>
+          <label>Review and tagging model<input required list="openrouter-models" value={settings.openrouter_model} onChange={(e) => setSettings({ ...settings, openrouter_model: e.target.value })} placeholder="google/gemini-3.1-flash-lite" /></label>
           <datalist id="openrouter-models">{models.map((model) => <option value={model.id} key={model.id}>{model.name}</option>)}</datalist>
           <p className="fineprint">Choose an image model with structured output, or enter its full OpenRouter model ID. OpenRouter usage is billed to your API key.</p>
           {catalogError && <p className="fineprint" role="status">{catalogError}</p>}
           <label>OpenRouter API key<input type="password" autoComplete="new-password" spellCheck={false} value={key} disabled={clearKey} onChange={(e) => setKey(e.target.value)} placeholder={settings.api_key_configured ? 'Key saved · leave blank to keep it' : 'Paste your OpenRouter API key'} /></label>
         {settings.api_key_configured && <label className="model-key-clear"><input type="checkbox" checked={clearKey} onChange={(e) => { setClearKey(e.target.checked); setKey(''); }} />Remove saved OpenRouter key</label>}
-        <p className="fineprint">The key is stored on your local Maply server, never in browser storage. Queued photos are tagged by the app automatically. Active photos finish with their original model.</p>
+        <p className="fineprint">The key is stored on your local Maply server, never in browser storage. AI reviews run only when you start a batch. Batch review results are accepted automatically. Single-photo reviews wait for your confirmation.</p>
         <button type="submit" className="btn btn-primary">{busy ? 'Saving…' : 'Save model settings'}</button>
       </fieldset> : !error && <p role="status">Loading model settings…</p>}
       {error && <p className="error" role="alert">{error}</p>}

@@ -14,7 +14,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U maply -d maply"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U maply -d maply"]
       interval: 3s
       timeout: 3s
       retries: 30
@@ -44,6 +44,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  atlas:
+    image: maply-app:local
+    environment:
+      DATABASE_URL: postgresql+psycopg://maply:${POSTGRES_PASSWORD:-maply}@db:5432/maply
+    command: ["sh", "-c", "while true; do python -m app.accessibility --output /snapshots || exit 1; sleep 30; done"]
+    volumes:
+      - ./data/accessibility:/snapshots
+    depends_on:
+      app:
+        condition: service_started
     restart: unless-stopped
 
 volumes:

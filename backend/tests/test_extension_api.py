@@ -20,8 +20,10 @@ H = {"X-Maply": "extension"}
 @pytest.fixture(scope="module")
 def client():
     import psycopg
+    from sqlalchemy.engine import make_url
 
     url = os.environ["DATABASE_URL"].replace("+psycopg", "")
+    assert make_url(url).database.startswith('maply_test'), 'Never reset a non-test database'
     try:
         with psycopg.connect(url, autocommit=True, connect_timeout=3) as c:
             c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
@@ -34,6 +36,30 @@ def client():
     from app.main import app
 
     return TestClient(app, base_url="http://127.0.0.1")
+
+
+def test_recovery_starts_at_the_requested_prepared_photo(client):
+    job = client.post('/api/jobs', json={'name': 'Targeted recovery', 'streets': GEORGE,
+                                      'options': {'spacing_m': 30}}).json()
+    shots = client.get(f"/api/jobs/{job['id']}/shots?limit=100").json()['items']
+    target = shots[-1]
+    url = f"/api/ext/next?job_id={job['id']}&code={target['code']}"
+    assert client.get(url).status_code == 403
+    assert client.get(url, headers=H).json()['shot']['id'] == target['id']
+    client.patch(f"/api/shots/{target['id']}", json={'status': 'skipped'})
+    assert client.get(url, headers=H).status_code == 409
+    assert client.post(f"/api/review/shots/{target['id']}/recover").status_code == 200
+    assert client.get(url, headers=H).json()['shot']['id'] == target['id']
+    assert client.get(f"/api/ext/next?job_id={job['id']}&code=DOES-NOT-EXIST", headers=H).status_code == 404
+    capture_url = f"https://www.google.com/maps/@{target['lat']:.7f},{target['lng']:.7f},3a,80y,{target['heading']:.2f}h,82t/data=!3m4!1e1!3m2!1sPANO!2e0"
+    response = client.post('/api/ext/capture', headers=H, json={
+        'shot_id': target['id'], 'image': _jpeg(), 'page_url': capture_url,
+        'image_date_text': 'Mar 2024'})
+    assert response.status_code == 200
+    saved = client.get(f"/api/shots/{target['id']}").json()
+    assert saved['result']['review_recovery']['previous_status'] == 'skipped'
+    assert saved['status'] == 'captured'
+    assert client.get(f"/api/jobs/{job['id']}/review/items?queue=untagged").json()['items'][0]['id'] == target['id']
 
 
 def _jpeg() -> str:

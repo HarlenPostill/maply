@@ -507,16 +507,18 @@ def task_event(tid: uuid.UUID, req: EventRequest, s: Session = Depends(get_db)):
     return {'ok': True}
 
 
-def store_labels(s, sh, t, labels, model, *, provenance=None):
+def store_labels(s, sh, t, labels, model, *, provenance=None, resolved_review_reasons=()):
     from app import backlog
     labels = LabelResult.model_validate(labels).model_dump(mode='json')
     j = s.get(Job, sh.job_id)
-    labels['review_reasons'] = list(dict.fromkeys(labels['review_reasons'] + review_reasons(labels)))
-    if sh.flags:
-        labels['review_reasons'].append('Source photo capture flags: ' + ', '.join(sh.flags))
+    labels['review_reasons'] = [reason for reason in dict.fromkeys(labels['review_reasons'] + review_reasons(labels)) if reason not in resolved_review_reasons]
+    review_flags = [flag for flag in sh.flags if flag != 'no_image_date']
+    if review_flags:
+        labels['review_reasons'].append('Source photo capture flags: ' + ', '.join(review_flags))
     labels['provenance'] = {'task_id': str(t.id), 'attempt': t.attempts, 'image_sha256': t.image_sha256,
                             'model': model, 'provider': 'openrouter', 'schema_version': SCHEMA_VERSION,
                             'tagged_at': now().isoformat(), 'imagery_date': sh.result.get('image_date_iso'),
+                            'imagery_date_type': 'available' if sh.result.get('image_date') else 'not_available',
                             'shot_id': str(sh.id), 'segment_key': sh.segment_key, 'side': sh.side,
                             'confidence_kind': 'model_reported_uncalibrated'}
     # Keep each successful attempt on disk as well as the current labels in Postgres.

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Maply accessibility atlas every 30 seconds
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=30s
+AccuracySec=1s
+Unit=maply-accessibility.service
+
+[Install]
+WantedBy=timers.target

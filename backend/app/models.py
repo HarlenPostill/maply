@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -177,4 +177,36 @@ class CaptureEvent(Base):
     run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('capture_runs.id', ondelete='CASCADE'), index=True)
     shot_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('shots.id', ondelete='CASCADE'))
     data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReviewBatch(Base):
+    __tablename__ = 'review_batches'
+    __table_args__ = (CheckConstraint('concurrency BETWEEN 1 AND 20'), CheckConstraint('item_limit BETWEEN 1 AND 5000'))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('jobs.id', ondelete='CASCADE'), index=True)
+    status: Mapped[str] = mapped_column(String(20), default='running', nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    item_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
+    auto_confirm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReviewItem(Base):
+    __tablename__ = 'review_items'
+    __table_args__ = (UniqueConstraint('batch_id', 'shot_id'), Index('ix_review_items_batch_status', 'batch_id', 'status'))
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('review_batches.id', ondelete='CASCADE'), nullable=False)
+    shot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('shots.id', ondelete='CASCADE'), index=True, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_labels_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default='queued')
+    token: Mapped[str | None] = mapped_column(String(64))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    proposed_labels: Mapped[dict | None] = mapped_column(JSONB)
+    usage: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    decision: Mapped[str | None] = mapped_column(String(30))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

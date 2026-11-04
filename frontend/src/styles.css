@@ -386,6 +386,8 @@ input:focus { border-color: var(--ink); outline: none; }
 .capture-panel fieldset { border: 1px solid var(--line, #d7ded9); padding: 12px; margin: 12px 0; min-width: 0; }
 .capture-panel label { display: block; margin: 10px 0; font-size: .9rem; }
 .capture-panel input { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; }
+.capture-panel label.check { display: flex; align-items: center; gap: 8px; }
+.capture-panel label.check input { display: inline-block; width: 1.05rem; margin: 0; }
 .capture-panel .path code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .capture-run, .capture-task { border-top: 1px solid var(--line, #d7ded9); padding: 12px 0; }
 .capture-task span { font-size: .85rem; overflow-wrap: anywhere; }

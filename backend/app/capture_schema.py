@@ -36,7 +36,7 @@ Use pass for uncertainty, wrong location, indoor imagery, user photo spheres, am
 Use no_imagery only for a clear absence of Street View; blocked only when the intended footpath is obscured.
 Use stop for a CAPTCHA, login request, access restriction or unexpected application. Never try to bypass it.
 For actions other than drag use 0.5 for all four coordinates. Read image_date from the visible imagery month/year,
-never a copyright year; use null if absent. Explain your visual evidence briefly. Do not claim certainty from blur.
+never a copyright year; use null if absent. A missing imagery date is acceptable: save and tag an otherwise valid photo normally; never pass or review solely because its date is unavailable. Explain your visual evidence briefly. Do not claim certainty from blur.
 """
 
 

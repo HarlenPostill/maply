@@ -11,7 +11,7 @@ async function load() {
   const session = await chrome.runtime.sendMessage({ type: 'session' });
   const running = !!session?.running;
   $('stop').hidden = !running;
-  $('start').textContent = running ? 'Restart from the next shot' : 'Start capturing';
+  $('start').textContent = running ? 'Restart recovery' : 'Start recovery';
 
   const res = await chrome.runtime.sendMessage({ type: 'jobs' });
   if (!res?.ok) {
@@ -40,7 +40,7 @@ async function load() {
 $('start').onclick = async () => {
   $('start').disabled = true;
   await chrome.storage.local.set({ jobId: $('job').value });
-  const r = await chrome.runtime.sendMessage({ type: 'start', jobId: $('job').value });
+  const r = await chrome.runtime.sendMessage({ type: 'start', jobId: $('job').value, code: $('photo-code').value.trim() });
   if (r?.ok) window.close();
   else { $('status').textContent = r?.error || 'Couldn’t start.'; $('start').disabled = false; }
 };

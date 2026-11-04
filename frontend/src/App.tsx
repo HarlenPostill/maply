@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { api, type Geo, type JobSummary, type Status, type FC } from './api';
-import MapView, { type Cone, type DrawMode } from './MapView';
-import NewJob from './NewJob';
+import type { Cone, DrawMode } from './MapView';
 import ModelSettings from './ModelSettings';
-import JobView from './JobView';
+import ReviewWorkspace from './ReviewWorkspace';
+const Visualiser = lazy(() => import('./visualiser/Visualiser'));
 
 export type MapState = {
   area: Geo | null;
@@ -22,105 +22,30 @@ export type MapState = {
   onSegmentClick?: (key: string) => void;
 };
 
-const EMPTY_MAP: MapState = { area: null, streets: null, cones: [], drawMode: null };
-
-type View = { kind: 'home' } | { kind: 'new' } | { kind: 'job'; id: string };
-
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [error, setError] = useState('');
   const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [view, setView] = useState<View>({ kind: 'home' });
-  const [mapState, setMapState] = useState<MapState>(EMPTY_MAP);
-  const [stageOverlay, setStageOverlay] = useState<React.ReactNode>(null);
-
-  const loadJobs = useCallback(() => api.get<JobSummary[]>('/api/jobs').then(setJobs).catch((e) => setError(e.message)), []);
-
+  const [error, setError] = useState('');
+  const [view, setView] = useState<'review' | 'atlas'>('review');
+  const [selectedJob, setSelectedJob] = useState('');
   useEffect(() => {
-    api.get<Status>('/api/status').then(setStatus).catch(() => setError('maply’s server isn’t responding. Start it with docker compose up, then reload.'));
-    loadJobs();
-  }, [loadJobs]);
-
-  useEffect(() => {
-    if (view.kind === 'home') {
-      setMapState(EMPTY_MAP);
-      setStageOverlay(null);
-    }
-  }, [view]);
-
-  if (!status) {
-    return <div className="boot">{error || 'Loading…'}</div>;
-  }
-
-  return (
-    <div className="app">
-      <aside className="panel">
-        <header className="brand">
-          <button type="button" className="wordmark" onClick={() => { setView({ kind: 'home' }); loadJobs(); }}>maply</button>
-          <span className="brand-note">Street imagery & accessibility</span>
-        </header>
-        <ModelSettings />
-
-        {view.kind === 'home' && (
-          <Home jobs={jobs} onNew={() => setView({ kind: 'new' })} onOpen={(id) => setView({ kind: 'job', id })} />
-        )}
-        {view.kind === 'new' && (
-          <NewJob
-            status={status}
-            setMap={setMapState}
-            onCancel={() => setView({ kind: 'home' })}
-            onCreated={(id) => { loadJobs(); setView({ kind: 'job', id }); }}
-          />
-        )}
-        {view.kind === 'job' && (
-          <JobView
-            key={view.id}
-            id={view.id}
-            status={status}
-            setMap={setMapState}
-            setOverlay={setStageOverlay}
-            onBack={() => { loadJobs(); setView({ kind: 'home' }); }}
-            onDeleted={() => { loadJobs(); setView({ kind: 'home' }); }}
-          />
-        )}
-      </aside>
-
-      <main className="stage">
-        <MapView status={status} {...mapState} />
-        {stageOverlay}
-      </main>
-    </div>
-  );
-}
-
-function Home({ jobs, onNew, onOpen }: { jobs: JobSummary[]; onNew: () => void; onOpen: (id: string) => void }) {
-  return (
-    <div className="panel-body">
-      <div className="home-head">
-        <h1>Jobs</h1>
-        <button type="button" className="btn btn-primary" onClick={onNew} data-testid="new-job">New job</button>
-      </div>
-      {jobs.length === 0 ? (
-        <div className="empty">
-          <p>No jobs yet.</p>
-          <p className="muted">Start a job by blocking out a few streets on the map. maply plans every photo for automatic OpenRouter capture or manual capture in Chrome.</p>
-        </div>
-      ) : (
-        <ul className="job-list">
-          {jobs.map((j) => {
-            const saved = j.counts.done;
-            return (
-              <li key={j.id}>
-                <button type="button" className="job-row" onClick={() => onOpen(j.id)} data-testid="job-row">
-                  <span className="job-row-name">{j.name}</span>
-                  <span className="job-row-meta">{saved} of {j.counts.total} photos</span>
-                  <span className="meter" aria-hidden="true"><span style={{ width: `${j.counts.total ? (100 * saved) / j.counts.total : 0}%` }} /></span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
+    let active = true;
+    Promise.all([api.get<Status>('/api/status'), api.get<JobSummary[]>('/api/jobs')])
+      .then(([nextStatus, nextJobs]) => { if (active) { setStatus(nextStatus); setJobs(nextJobs); } })
+      .catch((failure: unknown) => { if (active) setError(failure instanceof Error ? failure.message : 'The local Maply server is unavailable.'); });
+    return () => { active = false; };
+  }, []);
+  if (error) return <div className="boot"><div><h1>Maply could not load</h1><p>{error}</p><button className="btn" onClick={() => window.location.reload()}>Try again</button></div></div>;
+  if (!status) return <div className="boot">Loading your local dataset…</div>;
+  if (view === 'atlas') return <Suspense fallback={<div className="boot">Loading accessibility atlas…</div>}><Visualiser jobs={jobs} status={status} onBack={() => setView('review')} /></Suspense>;
+  const job = jobs.find((item) => item.id === selectedJob) ?? jobs[0];
+  return <div className="review-app">
+    <header className="review-app-header">
+      <div className="review-brand"><button className="wordmark" onClick={() => setView('review')}>maply<span> / </span>review</button><span className="review-local">Local dataset</span></div>
+      <nav aria-label="Workspace"><button className="review-nav-active" aria-current="page">Review workspace</button><button onClick={() => setView('atlas')}>Accessibility atlas ↗</button></nav>
+      <div className="review-settings"><ModelSettings /></div>
+    </header>
+    {jobs.length > 1 && <div className="review-job-select"><label>Dataset <select value={job?.id ?? ''} onChange={(event) => setSelectedJob(event.target.value)}>{jobs.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label></div>}
+    {job ? <ReviewWorkspace key={job.id} job={job} /> : <main className="review-empty-dataset"><h1>No local dataset found</h1><p>Start Maply with the database containing your completed capture job.</p></main>}
+  </div>;
 }

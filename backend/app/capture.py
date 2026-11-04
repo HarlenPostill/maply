@@ -1,6 +1,7 @@
 """Visual capture orchestration. Browser interaction happens only on the host desktop."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -47,12 +48,16 @@ class RunConfig(BaseModel):
     model: str = Field(default='google/gemini-3.1-flash-lite', min_length=3, max_length=100, pattern=r'^[^\s/]+/[^\s]+$')
     fallback_models: list[str] = Field(default_factory=list, max_length=5)
     max_photos: int = Field(default=200, ge=1, le=100000)
+    max_saved_photos: int = Field(default=0, ge=0, le=100000)
     max_requests: int = Field(default=1000, ge=1, le=1000000)
     max_cost_usd: float = Field(default=5, gt=0, le=10000)
     hours: float = Field(default=8, gt=0, le=72)
     max_steps: int = Field(default=6, ge=1, le=20)
     min_confidence: float = Field(default=.9, ge=.5, le=1)
     load_seconds: float = Field(default=4, ge=2, le=30)
+    # YOLO runs never pause themselves on errors; only the photo, request, cost
+    # and duration goals (or the user) end or pause them.
+    yolo: bool = False
 
     @field_validator('fallback_models')
     @classmethod
@@ -69,6 +74,7 @@ class NewRun(RunConfig):
 class RunControl(BaseModel):
     model_config = ConfigDict(extra='forbid')
     reason: str | None = Field(default=None, max_length=600)
+    if_running: bool = False
 
 
 class LeaseRequest(BaseModel):
@@ -88,13 +94,23 @@ class Completion(Assessment):
     pass
 
 
+class NoImagery(LeaseAuth):
+    page_url: str = Field(max_length=20000)
+
+
 class Release(LeaseAuth):
     reason: str = Field(max_length=600)
 
 
-def public_run(r):
+def public_run(r, s):
+    saved, review_count, marked = s.execute(select(
+        func.count().filter(CaptureTask.status == 'finished', Shot.result['capture_run_id'].astext == str(r.id), Shot.result['file'].astext.is_not(None), Shot.status.not_in(['no_imagery', 'blocked'])),
+        func.count().filter(CaptureTask.status == 'review'),
+        func.count().filter(CaptureTask.status == 'finished', Shot.result['capture_run_id'].astext == str(r.id), Shot.status.in_(['no_imagery', 'blocked'])),
+    ).select_from(CaptureTask).join(Shot, Shot.id == CaptureTask.shot_id).where(CaptureTask.run_id == r.id)).one()
     return {'id': str(r.id), 'job_id': str(r.job_id), 'status': r.status, 'config': r.config,
             'requests': r.requests, 'cost_usd': r.cost_usd, 'finished': r.finished,
+            'saved': saved, 'review': review_count, 'marked': marked,
             'error': r.error, 'created_at': r.created_at.isoformat(), 'expires_at': r.expires_at.isoformat()}
 
 
@@ -105,6 +121,13 @@ def locked_run(s, rid):
     return r
 
 
+def saved_count(s, rid):
+    return s.scalar(select(func.count()).select_from(CaptureTask).join(Shot, Shot.id == CaptureTask.shot_id).where(
+        CaptureTask.run_id == rid, CaptureTask.status == 'finished',
+        Shot.result['capture_run_id'].astext == str(rid), Shot.result['file'].astext.is_not(None),
+        Shot.status.not_in(['no_imagery', 'blocked'])))
+
+
 def revoke(s, rid):
     for task in s.scalars(select(CaptureTask).where(CaptureTask.run_id == rid, CaptureTask.status == 'leased').with_for_update()):
         if task.steps == 0:
@@ -113,8 +136,11 @@ def revoke(s, rid):
 
 
 def active(r, s, *, limits=True):
-    if r.status == 'running' and (r.expires_at <= now() or r.finished >= r.config['max_photos']):
-        r.status, r.error = 'completed', 'Run duration or photo limit reached'
+    saved_target = r.config.get('max_saved_photos', 0)
+    saved_goal_reached = (r.status == 'running' and saved_target and r.finished >= saved_target
+                          and saved_count(s, r.id) >= saved_target)
+    if r.status == 'running' and (r.expires_at <= now() or r.finished >= r.config['max_photos'] or saved_goal_reached):
+        r.status, r.error = 'completed', 'Saved photo goal reached' if saved_goal_reached else 'Run duration or photo limit reached'
         revoke(s, r.id)
         s.commit()
     if limits and r.status == 'running' and (r.requests >= r.config['max_requests'] or r.cost_usd >= r.config['max_cost_usd']):
@@ -123,6 +149,32 @@ def active(r, s, *, limits=True):
         s.commit()
     if r.status != 'running':
         raise HTTPException(409, r.error or f'Run is {r.status}')
+
+
+def auto_pause(r, reason):
+    """Pause a running run for a problem that is not a goal; YOLO runs note it and continue."""
+    if r.status != 'running':
+        return
+    if (r.config or {}).get('yolo'):
+        r.error = f'YOLO mode continued after: {reason}'[:600]
+    else:
+        r.status, r.error = 'paused', reason
+
+
+def provider_rejection(response):
+    # Provider messages may contain private key identifiers; expose only known categories.
+    try:
+        metadata = response.json()['error']['metadata']
+    except (ValueError, KeyError, TypeError):
+        metadata = {}
+    if isinstance(metadata, dict) and metadata.get('limit_source') == 'openrouter_key_limit':
+        return 'OpenRouter API key spending limit reached. Raise the key limit at https://openrouter.ai/settings/keys.'
+    return {
+        401: 'OpenRouter rejected the API key. Update it in Model settings.',
+        402: 'OpenRouter credits exhausted. Add credits to the provider account.',
+        403: 'OpenRouter denied this request. Check the API key limits and permissions.',
+        429: 'OpenRouter rate limit reached. Capture will retry according to the run settings.',
+    }.get(response.status_code, f'OpenRouter rejected the assessment (HTTP {response.status_code}).')
 
 
 def locked_task(s, rid, sid, auth):
@@ -171,7 +223,15 @@ def create_run(req: NewRun, s: Session = Depends(get_db)):
     r = CaptureRun(job_id=req.job_id, config=req.model_dump(exclude={'job_id'}), expires_at=now() + timedelta(hours=req.hours))
     s.add(r)
     s.commit()
-    return public_run(r)
+    return public_run(r, s)
+
+
+@router.get('/runs')
+def recent_runs(s: Session = Depends(get_db)):
+    """Recent runs across jobs, newest first, for the iOS app and lock screen widget."""
+    rows = s.execute(select(CaptureRun, Job.name).join(Job, Job.id == CaptureRun.job_id)
+                     .order_by(CaptureRun.created_at.desc()).limit(20)).all()
+    return {'managed': get_settings().capture_managed, 'runs': [{**public_run(r, s), 'job_name': name} for r, name in rows]}
 
 
 @router.get('/jobs/{jid}')
@@ -179,10 +239,16 @@ def job_runs(jid: uuid.UUID, s: Session = Depends(get_db)):
     runs = s.scalars(select(CaptureRun).where(CaptureRun.job_id == jid).order_by(CaptureRun.created_at.desc()).limit(10)).all()
     tasks = s.execute(select(CaptureTask, Shot.code).join(Shot, Shot.id == CaptureTask.shot_id).where(
         Shot.job_id == jid, CaptureTask.status.in_(['review', 'leased'])).order_by(CaptureTask.updated_at.desc()).limit(100)).all()
-    return {'runs': [public_run(r) for r in runs], 'tasks': [
+    return {'managed': get_settings().capture_managed, 'runs': [public_run(r, s) for r in runs], 'tasks': [
         {'shot_id': str(t.shot_id), 'code': code, 'status': t.status, 'worker_id': t.worker_id,
          'lease_until': t.lease_until.isoformat(), 'error': t.error, 'steps': t.steps,
          'updated_at': t.updated_at.isoformat(), 'has_evidence': bool(t.decision and t.decision.get('value', {}).get('action') == 'review')} for t, code in tasks]}
+
+
+@router.get('/worker/runs', dependencies=[Depends(worker_header)])
+def queued_runs(s: Session = Depends(get_db)):
+    runs = s.scalars(select(CaptureRun).where(CaptureRun.status == 'running').order_by(CaptureRun.created_at)).all()
+    return {'runs': [public_run(r, s) for r in runs]}
 
 
 @router.get('/runs/{rid}')
@@ -190,12 +256,22 @@ def get_run(rid: uuid.UUID, s: Session = Depends(get_db)):
     r = s.get(CaptureRun, rid)
     if not r:
         raise HTTPException(404, 'Capture run not found')
-    return public_run(r)
+    return public_run(r, s)
 
 
 @router.post('/runs/{rid}/{action}')
 def control_run(rid: uuid.UUID, action: Literal['pause', 'resume', 'stop'], req: RunControl | None = None, s: Session = Depends(get_db)):
     r = locked_run(s, rid)
+    # A late worker failure must not replace a user pause or a server-side
+    # validation error. Check under the same row lock as the state transition.
+    if action == 'pause' and req and req.if_running and r.status != 'running':
+        return public_run(r, s)
+    # Worker and supervisor failure pauses are conditional; YOLO runs keep going.
+    # Expired leases with no assessments do not consume visual attempts.
+    if action == 'pause' and req and req.if_running and r.config.get('yolo'):
+        auto_pause(r, req.reason or 'Worker interrupted')
+        s.commit()
+        return public_run(r, s)
     if r.status in ('stopped', 'completed'):
         raise HTTPException(409, 'Create a new run after this run ends')
     r.status, r.error = {'pause': 'paused', 'resume': 'running', 'stop': 'stopped'}[action], None
@@ -206,7 +282,7 @@ def control_run(rid: uuid.UUID, action: Literal['pause', 'resume', 'stop'], req:
     if action in ('pause', 'stop'):
         revoke(s, rid)
     s.commit()
-    return public_run(r)
+    return public_run(r, s)
 
 
 @router.put('/runs/{rid}')
@@ -217,7 +293,7 @@ def configure_run(rid: uuid.UUID, req: RunConfig, s: Session = Depends(get_db)):
     r.config = req.model_dump()
     r.expires_at = now() + timedelta(hours=req.hours)
     s.commit()
-    return public_run(r)
+    return public_run(r, s)
 
 
 @router.post('/review/{sid}/retry')
@@ -248,6 +324,11 @@ def claim(rid: uuid.UUID, req: LeaseRequest, s: Session = Depends(get_db)):
     if r.finished + leased_count >= r.config['max_photos']:
         s.commit()
         return {'task': None, 'status': 'running'}
+    saved_target = r.config.get('max_saved_photos', 0)
+    if (saved_target and r.finished + leased_count >= saved_target
+            and saved_count(s, rid) + leased_count >= saved_target):
+        s.commit()
+        return {'task': None, 'status': 'running'}
     # Locking the run serialises workers on this run; locking the shot also protects cross-run claims.
     busy = exists().where(CaptureTask.shot_id == Shot.id, or_(CaptureTask.status == 'review',
         and_(CaptureTask.status == 'leased', CaptureTask.lease_until > now())))
@@ -265,6 +346,9 @@ def claim(rid: uuid.UUID, req: LeaseRequest, s: Session = Depends(get_db)):
     if t is None:
         t = CaptureTask(shot_id=sh.id, attempts=0)
         s.add(t)
+    elif t.status == 'leased' and t.steps == 0:
+        # A browser failure before assessment says nothing about this photo.
+        t.attempts = max(0, t.attempts - 1)
     t.run_id, t.worker_id, t.token = rid, req.worker_id, uuid.uuid4().hex
     t.status, t.steps, t.decision, t.error = 'leased', 0, None, None
     t.attempts += 1
@@ -295,8 +379,29 @@ def release_review(rid: uuid.UUID, sid: uuid.UUID, req: Release, s: Session = De
     return {'ok': True}
 
 
+@router.post('/worker/runs/{rid}/shots/{sid}/no-imagery', dependencies=[Depends(worker_header)])
+def no_imagery(rid: uuid.UUID, sid: uuid.UUID, req: NoImagery, s: Session = Depends(get_db)):
+    if not maps_url(req.page_url):
+        raise HTTPException(422, 'Expected the observed Google Maps URL')
+    r, sh, t = locked_task(s, rid, sid, req)
+    backlog.resolve(s, sh)
+    sh.status = 'no_imagery'
+    sh.capture_source = 'automation'
+    sh.result = {**(sh.result or {}), 'marked_at_url': req.page_url, 'capture_run_id': str(rid)}
+    t.status, t.updated_at = 'finished', now()
+    r.finished += 1
+    s.commit()
+    return {'status': sh.status}
+
+
 @router.post('/worker/runs/{rid}/shots/{sid}/assess', dependencies=[Depends(worker_header)])
-async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = Depends(get_db)):
+def assess_request(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = Depends(get_db)):
+    # SQLAlchemy uses blocking row locks. Keep the whole session off the API loop,
+    # including cleanup, so another request can release a lock this one awaits.
+    return asyncio.run(assess(rid, sid, req, s))
+
+
+async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session):
     from app.results import camera_check
     from app.models import Segment
     data = image_bytes(req.image)
@@ -339,6 +444,7 @@ async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = D
             'response_format': {'type': 'json_schema', 'json_schema': {
                 'name': 'capture_decision', 'strict': False, 'schema': combined_schema()}}}
     error, response, decision = None, {}, None
+    rejected = False
     try:
         async with httpx.AsyncClient(timeout=65, follow_redirects=False) as client:
             result = await client.post('https://openrouter.ai/api/v1/chat/completions',
@@ -353,8 +459,11 @@ async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = D
             if choice.get('finish_reason') != 'stop':
                 raise ValueError('Incomplete model response')
             decision = CaptureDecision.model_validate_json(choice['message']['content'])
+    except httpx.HTTPStatusError as exc:
+        rejected = True
+        error = provider_rejection(exc.response)
     except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError, AttributeError, ValidationError):
-        error = 'Model request failed or returned an invalid capture decision; run paused'
+        error = 'Model request failed or returned an invalid capture decision'
     # Expire ORM state after IO so pause/stop and lease changes are observed.
     s.expire_all()
     r = locked_run(s, rid)
@@ -382,9 +491,12 @@ async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = D
     valid = t and t.run_id == rid and t.token == req.token and t.status == 'leased' and t.lease_until > now() and t.steps == step
     if valid:
         t.decision = None
+        if rejected:
+            # A rejected request did not assess the photo. Keep request accounting,
+            # but do not consume visual attempts or send unseen photos to review.
+            t.steps -= 1
     if error:
-        if r.status == 'running':
-            r.status, r.error = 'paused', error
+        auto_pause(r, error)
     elif valid and r.status == 'running':
         if decision.action == 'pass':
             decision.action = 'review'
@@ -397,10 +509,14 @@ async def assess(rid: uuid.UUID, sid: uuid.UUID, req: Assessment, s: Session = D
                 .order_by(CaptureEvent.id.desc()).limit(3)).all()
             if len(recent) == 3 and all(e.data.get('camera_valid') is False and
                 (e.data.get('decision') or {}).get('action') == 'save' for e in recent):
-                r.status, r.error = 'paused', 'Camera URL validation failed on three consecutive model-approved views. Run paused to check the camera format before collecting more backlog.'
+                auto_pause(r, 'Camera URL validation failed on three consecutive model-approved views. Run paused to check the camera format before collecting more backlog.')
 
         if decision.action == 'save' and decision.labels and isinstance(decision.labels.get('footpath'), dict) and decision.labels['footpath'].get('value') == 'unknown':
             decision.action, decision.reason = 'review', 'Target footpath is uncertain: ' + decision.reason[:500]
+        if decision.action == 'stop' and config.get('yolo'):
+            # The model cannot halt a YOLO run; this photo goes to manual review instead.
+            auto_pause(r, decision.reason)
+            decision.action, decision.reason = 'review', 'Model requested a stop: ' + decision.reason[:500]
         t.decision = {'value': decision.model_dump(), 'sha256': hashlib.sha256(data).hexdigest(), 'page_url': req.page_url,
                       'model': actual_model}
         if decision.action == 'stop':

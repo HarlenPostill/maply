@@ -12,6 +12,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      '/assets/accessibility': { target: API, changeOrigin: false },
       '/api': { target: API, changeOrigin: false },
       '/files': { target: API, changeOrigin: false },
     },
@@ -19,6 +20,7 @@ export default defineConfig({
   preview: {
     host: '127.0.0.1',
     proxy: {
+      '/assets/accessibility': { target: API, changeOrigin: false },
       '/api': { target: API, changeOrigin: false },
       '/files': { target: API, changeOrigin: false },
     },

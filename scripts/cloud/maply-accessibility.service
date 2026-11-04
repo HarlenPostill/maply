@@ -1,0 +1,10 @@
+[Unit]
+Description=Publish Maply accessibility observations (read-only)
+After=docker.service maply-app.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/maply
+ExecStart=/usr/bin/docker compose exec -T app python -m app.accessibility --output /app/frontend/dist/assets/accessibility
+TimeoutStartSec=90
+Nice=10

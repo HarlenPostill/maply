@@ -1,0 +1,15 @@
+[Unit]
+Description=Maply capture run %i
+Requires=maply-desktop.service maply-app.service
+After=maply-desktop.service maply-app.service
+
+[Service]
+User=maply
+Group=maply
+WorkingDirectory=/opt/maply/backend
+Environment=HOME=/home/maply
+Environment=DISPLAY=:99
+Environment=XAUTHORITY=/home/maply/.Xauthority
+ExecStart=/opt/maply/backend/.venv/bin/python /opt/maply/scripts/capture_worker.py --run %i
+Restart=no
+TimeoutStopSec=120

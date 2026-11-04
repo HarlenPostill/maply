@@ -130,6 +130,7 @@ def camera_check(shot, final_url: str, image_date: str | None, segment_bearing: 
     if not image_date:
         flags.append("no_image_date")
     result["final_url"] = final_url or None
+    result["image_date_type"] = "available" if image_date else "not_available"
     result["image_date"] = image_date or None
     result["image_date_iso"] = parse_image_date(image_date)
     return flags, result

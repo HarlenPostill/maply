@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     # Browser used by the native capture adapter.
     browser_app: str = "Google Chrome"
     tagging_autostart: bool = True
+    capture_managed: bool = False
 
     # Street lookup for "block out an area" (OpenStreetMap, no key). If the local
     # street file exists (scripts/fetch_streets.py) it is used and no network is needed;

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 ROOT = Path(__file__).resolve().parents[1]
 SKIP = {'.git', '.venv', 'node_modules', '__pycache__', '.pytest_cache', 'dist', '.DS_Store'}
 SOURCE_ROOTS = ['backend', 'frontend', 'extension', 'config', 'scripts', 'assets']
-SOURCE_FILES = ['README.md', 'docker-compose.yml', '.env.example', '.dockerignore', '.gitignore']
+SOURCE_FILES = ['README.md', 'docker-compose.yml', 'docker-compose.dev.yml', '.env.example', '.dockerignore', '.gitignore']
 
 
 def run(args, cwd, **kwargs):
@@ -38,7 +38,9 @@ def sql(project, query):
 def start_db(project):
     compose(project, 'up', '-d', 'db')
     for _ in range(60):
-        result = subprocess.run(['docker', 'compose', 'exec', '-T', 'db', 'pg_isready', '-U', 'maply', '-d', 'maply'],
+        # The image's initialization server accepts Unix sockets before its
+        # final restart. Wait for TCP so a restore cannot race that shutdown.
+        result = subprocess.run(['docker', 'compose', 'exec', '-T', 'db', 'pg_isready', '-h', '127.0.0.1', '-U', 'maply', '-d', 'maply'],
                                 cwd=project, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if result.returncode == 0:
             return
@@ -194,13 +196,18 @@ def restore_workspace(bundle, project):
     print('Restoring PostgreSQL…', flush=True)
     with (bundle / 'database.dump').open('rb') as source:
         compose(project, 'exec', '-T', 'db', 'pg_restore', '-U', 'maply', '-d', 'maply', '--no-owner', '--no-acl', '--exit-on-error', stdin=source)
+    finish_restore(bundle, project, manifest)
+
+
+def finish_restore(bundle, project, manifest):
+    """Verify and activate a completed import; also usable for an interrupted setup."""
     actual = inventory(project)
     if actual != manifest['inventory']:
         raise RuntimeError('Restored database inventory does not match the source snapshot')
     # In-flight work cannot be resumed with credentials/leases from another computer.
     # Completed progress and manual review decisions remain unchanged.
     sql(project, """BEGIN;
-        UPDATE capture_runs SET status='paused', error='Moved to the server Mac; resume after starting its desktop worker.' WHERE status='running';
+        UPDATE capture_runs SET status='paused', error='Moved to a new server; resume after starting its desktop worker.' WHERE status='running';
         UPDATE capture_tasks SET status='released', token=md5(random()::text), lease_until=now(), decision=NULL WHERE status='leased';
         UPDATE tag_tasks SET status='queued', lease_token=NULL, lease_until=NULL, worker_id=NULL WHERE status='running';
         DELETE FROM tag_workers;

@@ -2,20 +2,56 @@
 
 # maply
 
-Plan Google Street View photos of every footpath in the City of Sydney, then
-capture them quickly yourself with a Chrome extension. Each photo is saved with
-the metadata an image model will need later: street, OSM tags, footpath side,
-planned and actual camera position and heading, distance to the nearest
-intersection, and imagery date.
-
-Maply runs locally. Planning and manual Chrome capture need no API keys. Automatic capture and image tagging use your saved OpenRouter key and any compatible image model.
+Review the completed City of Sydney footpath dataset locally. Check uncertain
+annotations against the original photos, request independent AI second opinions,
+and recover missing views with the Chrome extension. Review batches automatically
+save AI results; single-photo reviews retain manual confirmation.
 
 ## Start
+
+This checkout now runs against the complete local dataset in `data/` and local
+PostGIS. Port 8000 serves the local app directly. No SSH tunnel, capture worker
+server, VPS, or public gateway is needed. Keep the existing `.env`, which selects
+the restored `maply-local-final_pgdata` database volume. Automatic paid tagging
+is disabled. The local `atlas` service refreshes accessibility snapshots every
+30 seconds using read-only database transactions. No cloud timer is needed.
 
 ```bash
 docker compose up -d --build
 open http://127.0.0.1:8000
 ```
+
+For frontend and backend hot reload, run `./scripts/dev.sh` and open
+`http://127.0.0.1:5173`.
+
+## Review the dataset
+
+The app opens directly into the review workspace. Planning and fleet controls
+are no longer part of the primary interface.
+
+1. Open **No footpath**, choose a bounded number of photos, and start an AI
+   second review. The default is 20 photos with two requests at a time, using
+   the OpenRouter model in **Model settings**. Starting or resuming a batch
+   makes paid requests; simply opening the workspace does not.
+2. Batch results are saved automatically and appear in **Confirmed**. An unknown
+   answer is saved as unknown and keeps its uncertainty checks. Single-photo
+   reviews and older manual batches still use **Ready to confirm**.
+3. Use **Needs a look** for other uncertain saved photos. Unrelated capture
+   warnings remain after confirming an AI annotation.
+4. For **Skipped**, **No imagery** or **Blocked**, open Street View and prepare
+   the point for capture. Reload the unpacked extension after updating this
+   checkout, paste the point's photo code and choose **Start recovery**. Targeted
+   recovery stops after that point. Return to the workspace to request tags for
+   the saved image and confirm them.
+
+Pause stops new requests; requests already running can finish. Restarting the
+app pauses unfinished batches. Confirmed results feed the local accessibility
+atlas. See [review workflow](docs/review-workflow.md) for data and state details.
+
+## Historical acquisition workflow
+
+The following documents the original planning and capture tools. Those controls
+are retained in source and APIs but are no longer shown in the review workspace.
 
 Once, download the City of Sydney street network from OpenStreetMap (a minute
 or two). "Block out an area" and "Whole city" then work offline:
@@ -55,7 +91,7 @@ Install it once:
 
 1. Open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**
    and choose the `extension/` folder in this repository.
-2. Pin **maply capture**. Click it, choose your job and press **Start capturing**.
+2. Pin **maply capture**. Click it, choose your job and press **Start recovery**.
 
 Then work through the shots in that tab:
 
@@ -99,6 +135,9 @@ photos in the old job afterwards, add `--into <new job folder>` to copy them
 across too (shots already done in the new job are left alone).
 
 ## Automatic capture with a native desktop worker
+
+For a dedicated Ubuntu cloud VM, see [cloud deployment](scripts/cloud/README.md).
+It runs Chrome on a persistent X11 desktop and uses the Linux adapter.
 
 Each job now has **Automatic capture in Chrome**. This is a model-independent
 visual loop: screenshots go to an OpenRouter image model, and a host worker
@@ -194,7 +233,7 @@ uv run --extra capture python ../scripts/capture_worker.py --server http://127.0
 ```
 
 The API key stays on the Maply server. Only screenshots, decisions and job data
-cross the tunnel. Workers currently support macOS Chrome; Windows/Linux need a
+cross the tunnel. Workers support macOS Chrome and Linux X11 Chrome; Windows needs a
 separate native adapter. A VM must provide a working graphical desktop and be
 validated for Street View rendering before use.
 
@@ -338,15 +377,43 @@ Lower *JPEG quality* in the extension's settings if you need smaller files.
 
 ## Development
 
+Run from this checkout with Docker and Node.js available:
+
 ```bash
-docker compose up -d db
-cd backend && uv sync && uv run alembic upgrade head
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-cd ../frontend && npm install && npm run dev     # http://127.0.0.1:5173
-cd ../backend && uv run pytest                   # quick checks, about a second
+./scripts/dev.sh
 ```
 
-After changing the extension, click its reload icon on `chrome://extensions`.
+Open <http://127.0.0.1:5173> for frontend hot reload. The backend reloads Python
+changes from `backend/app/` and serves the local API at <http://127.0.0.1:8000>.
+Vite forwards API and photo requests to that local backend. The Chrome extension
+and native capture worker continue to use port 8000 directly. Ctrl+C stops Vite;
+the backend and database remain running. Stop them with `docker compose stop`.
+
+For the built app on port 8000, run `docker compose up -d --build` instead.
+Rebuild after frontend changes to update that bundled version.
+
+For a backend running on the host instead of in Docker, stop the container app
+first. The database remains local on port 5433:
+
+```bash
+docker compose stop app
+docker compose up -d db
+cd backend
+uv sync
+TAGGING_AUTOSTART=false uv run alembic upgrade head
+TAGGING_AUTOSTART=false uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+Run focused checks without touching the dataset:
+
+```bash
+cd backend
+uv run pytest tests/test_core.py tests/test_server_transfer.py tests/test_accessibility.py
+```
+
+Database integration tests must use a separate test database and a temporary data
+directory. Never point tests at the real `maply` database. After changing the
+extension, click its reload icon on `chrome://extensions`.
 
 ## Limitations
 
@@ -375,53 +442,35 @@ explicit panorama metadata; an aerial map URL alone never passes camera checks.
 If three consecutive model-approved images fail camera validation, the run pauses
 for investigation rather than continuing to accumulate manual backlog entries.
 
-## Permanent server Mac and laptop client
+## Verify and back up local data
 
-Keep one authoritative database and `data/` directory on the server Mac. Other
-computers connect by SSH; they do not start a second Maply app or sync live database
-files. Manual captures, desktop workers, tagging and review all use the same server.
-
-For a complete, consistent handoff, stop capture and export from the source checkout:
+Verify every current database photo against its SHA256, plus its thumbnail and
+annotation file:
 
 ```bash
-python3 scripts/server_transfer.py export --output data/transfers/maply-transfer
+python3 scripts/verify_local_copy.py .
 ```
 
-This leaves the source app stopped and creates a logical PostgreSQL dump, current
-source archive (including uncommitted changes), image/preference archive, and
-SHA-256 manifest. The bundle includes the saved OpenRouter key, is owner-readable,
-and belongs on your private disks/SSH connection. The original files and Docker
-volume are retained. Export bundles are excluded from Git under `data/`.
+The receipt is saved to `data/local-verification.json`. This checkout's `data/`
+and its local database volume are the single source of truth. The old cloud
+snapshots, transfer bundles, restored workspace, cutover backup, and historical
+local database have been removed after verification. The cleanup record is
+`data/backup-cleanup-receipt.json`. Do not create additional dataset copies or
+partial backups automatically.
 
-Copy the entire transfer directory to the server Mac. With Docker/Compose running,
-restore into an empty directory:
+When you choose to make a new backup of the main copy, stop capture first, then run:
 
 ```bash
-python3 /path/to/bundle/server_transfer.py restore --bundle /path/to/bundle --project ~/Maply
+python3 scripts/server_transfer.py export --output data/transfers/maply-local-backup
 ```
 
-Restore checks every archive, every data file and database inventory. It refuses
-an existing workspace/database. Capture runs from the source are paused and old
-worker reservations revoked. Tagging remains disabled until the restored app has
-been inspected. Enable it after verification:
+Export stops the app and saves the source, data, and logical PostgreSQL dump with
+checksums. It retains the original files and database volume. The export includes
+private provider settings, so keep it on a private disk. Restart the local app with
+`docker compose up -d`, or use `./scripts/dev.sh` to return to development.
 
-```bash
-cd ~/Maply
-python3 scripts/server_transfer.py activate
-python3 scripts/install_server_login.py
-```
-
-The login job starts the container runtime/app and prevents idle system sleep. It
-runs after the server user logs in; it does not bypass the Mac login screen. For
-native capture, keep the laptop open and plugged in, complete Chrome's first-run
-setup, and grant the capture Terminal Accessibility, Automation and Screen Recording
-permissions. Start the capture worker in that Mac's Terminal using the run command
-from Maply. The capture worker itself is not started by the server login job.
-
-On the client Mac, `scripts/connect_server.py` reads `data/client-server.json` with
-`host`, `identity_file`, `local_port`, `remote_port` and `expected_job_ids`. It opens
-a loopback-only SSH tunnel, checks the expected jobs and opens the app. A client
-login tunnel can keep port 8000 available automatically, so the extension retains
-its usual `http://127.0.0.1:8000` setting. Never start the old local app on this Mac
-once the server becomes authoritative. Reserve the server's IP in the router, or
-update its SSH hostname when the address changes.
+The retired tunnel and cloud tagging LaunchAgents have been removed from the
+login folder. Historical infrastructure scripts remain under `scripts/cloud/`.
+They are not part of local startup. Keep saved SSH keys and server credentials
+private. Map tiles, Street View, and optional model inference require internet
+access, but the stored dataset and application database are entirely local.

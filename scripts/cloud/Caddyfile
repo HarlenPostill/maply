@@ -1,0 +1,27 @@
+{$MAPLY_PUBLIC_HOST} {
+    encode zstd gzip
+
+    basic_auth {
+        {$MAPLY_PUBLIC_USER} {$MAPLY_PASSWORD_HASH}
+    }
+
+    @foreignOrigin {
+        method POST PUT PATCH DELETE
+        header Origin *
+        not header Origin https://{$MAPLY_PUBLIC_HOST}
+    }
+    respond @foreignOrigin "Cross-origin request denied" 403
+
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options DENY
+        Cache-Control "private, no-store"
+    }
+
+    reverse_proxy 127.0.0.1:8000 {
+        # Keep FastAPI's trusted-host boundary and browser credentials local.
+        header_up Host 127.0.0.1:8000
+        header_up -Authorization
+    }
+}

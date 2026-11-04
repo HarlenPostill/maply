@@ -11,7 +11,7 @@ h2 { font-size: 14px; margin: 0 0 6px; }
 p { margin: 0 0 10px; }
 .muted { color: #5f6b70; font-size: 13px; }
 .field { display: block; font-size: 13px; color: #5f6b70; margin: 10px 0 4px; }
-select, input[type='url'], input[type='number'] { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border: 1px solid #dce1de; border-radius: 8px; }
+select, input[type='url'], input[type='number'], input[type='text'] { width: 100%; box-sizing: border-box; font: inherit; padding: 6px 8px; border: 1px solid #dce1de; border-radius: 8px; }
 button { width: 100%; font: inherit; font-weight: 700; padding: 9px; margin-top: 8px; border-radius: 8px; border: 1px solid #dce1de; background: #fff; color: #22313a; cursor: pointer; }
 button.primary { background: #f2c230; border-color: #f2c230; color: #24200f; }
 button:disabled { opacity: 0.5; cursor: default; }

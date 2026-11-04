@@ -90,6 +90,9 @@ def test_result_matching_and_flags(tmp_path):
     good = f"https://www.google.com/maps/@-33.8750150,151.2066830,3a,80y,{280:.2f}h,82t/data=!3m6!1e1!3m4!1sPANO!2e0"
     status, flags, res = evaluate(sh, tmp_path, {"shot": sh.code, "status": "captured", "final_url": good, "image_date": "Mar 2023"}, 7.5)
     assert status == "captured" and flags == [] and res["camera_offset_m"] < 2 and res["pano_id"] == "PANO"
+    status, flags, undated = evaluate(sh, tmp_path, {"shot": sh.code, "status": "captured", "final_url": good}, 7.5)
+    assert status == "captured" and flags == ["no_image_date"]
+    assert undated["image_date_type"] == "not_available" and undated["image_date_iso"] is None
     wrong = good.replace("280.00h", "95.00h")  # facing the east footpath instead
     status, flags, _ = evaluate(sh, tmp_path, {"shot": sh.code, "status": "captured", "final_url": wrong}, 7.5)
     assert status == "needs_check" and {"heading_off", "wrong_side", "no_image_date"} <= set(flags)

@@ -1,0 +1,9 @@
+services:
+  app:
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/backend/app --timeout-graceful-shutdown 10"]
+    volumes:
+      - ./backend:/app/backend
+      - ./config:/app/config:ro
+  atlas:
+    volumes:
+      - ./backend:/app/backend:ro

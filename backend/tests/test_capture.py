@@ -36,6 +36,62 @@ def new_run(client, **overrides):
     return job, r.json()
 
 
+def test_cloud_queue_requires_worker_header_and_omits_paused_runs(client):
+    job, run = new_run(client)
+    assert client.get('/api/capture/worker/runs').status_code == 403
+    queue = client.get('/api/capture/worker/runs', headers=H).json()['runs']
+    assert run['id'] in [item['id'] for item in queue]
+    client.post(f"/api/capture/runs/{run['id']}/pause", json={})
+    assert run['id'] not in [item['id'] for item in client.get('/api/capture/worker/runs', headers=H).json()['runs']]
+    assert client.get(f"/api/capture/jobs/{job['id']}").json()['managed'] is False
+
+
+def test_late_worker_pause_preserves_validation_and_terminal_states(client):
+    _, run = new_run(client)
+    url = f"/api/capture/runs/{run['id']}"
+    original = 'Camera URL validation failed on three consecutive views'
+    client.post(url+'/pause', json={'reason': original})
+    late = client.post(url+'/pause', json={'reason': 'Worker interrupted', 'if_running': True})
+    assert late.json()['error'] == original
+    client.post(url+'/stop', json={})
+    assert client.post(url+'/pause', json={'reason': 'Worker interrupted', 'if_running': True}).json()['status'] == 'stopped'
+
+
+@pytest.mark.asyncio
+async def test_worker_signal_never_replaces_a_pause_reason():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    module = worker_module()
+    worker = SimpleNamespace(stopped=asyncio.Event(), run_id='run-id', api=AsyncMock())
+    worker.stopped.set()
+    await module.pause_failed_run(worker, DesktopError('Worker interrupted'))
+    worker.api.assert_not_called()
+    worker.stopped.clear()
+    await module.pause_failed_run(worker, DesktopError('Clipboard failed'))
+    worker.api.assert_awaited_once_with('runs/run-id/pause', {'reason': 'Clipboard failed', 'if_running': True})
+
+
+@pytest.mark.asyncio
+async def test_supervisor_shutdown_is_a_clean_worker_exit(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    module = worker_module()
+    worker = SimpleNamespace(stopped=asyncio.Event(), run_id=str(uuid.uuid4()), api=AsyncMock(), delay=AsyncMock())
+    async def interrupted():
+        worker.stopped.set()
+        raise DesktopError('Worker interrupted')
+    worker.run = interrupted
+    monkeypatch.setattr(module, 'Worker', lambda *_: worker)
+    monkeypatch.setattr(module, 'LinuxChrome', lambda: object())
+    monkeypatch.setattr(module, 'MacChrome', lambda: object())
+    monkeypatch.setattr(module.tempfile, 'gettempdir', lambda: str(tmp_path))
+    monkeypatch.setattr(asyncio.get_running_loop(), 'add_signal_handler', lambda *_: None)
+    monkeypatch.setattr(sys, 'argv', ['capture_worker.py', '--run', worker.run_id])
+    await module.main()
+    worker.api.assert_not_called()
+
+
 def claim(client, run, worker='worker-1'):
     return client.post(f"/api/capture/worker/runs/{run['id']}/claim", headers=H, json={'worker_id': worker})
 
@@ -79,6 +135,47 @@ def test_exclusive_claims_and_manual_interoperation(client):
     assert client.patch(f"/api/shots/{a['shot']['id']}", json={'status': 'retake'}).status_code == 409
 
 
+def test_six_workers_obey_shared_photo_cap_and_pause_revokes_all(client):
+    _, run = new_run(client, max_photos=4)
+    with ThreadPoolExecutor(6) as pool:
+        claimed = list(pool.map(lambda i: (i, claim(client, run, f'fleet-{i}').json()['task']), range(6)))
+    tasks = [(i, task) for i, task in claimed if task]
+    assert len(tasks) == 4
+    assert len({task['shot']['id'] for _, task in tasks}) == 4
+    client.post(f"/api/capture/runs/{run['id']}/pause", json={})
+    for i, task in tasks:
+        response = client.post(path(run, task, 'heartbeat'), headers=H,
+            json={'worker_id': f'fleet-{i}', 'token': task['token']})
+        assert response.status_code == 409
+
+
+def test_saved_photo_target_excludes_review_and_no_imagery_and_reserves_final_slots(client, monkeypatch):
+    _, run = new_run(client, max_photos=20, max_saved_photos=2)
+    task = claim(client, run).json()['task']
+    body = payload(task)
+    body.pop('image')
+    assert client.post(path(run, task, 'no-imagery'), headers=H, json=body).status_code == 200
+    task = claim(client, run).json()['task']
+    assert client.post(path(run, task, 'review'), headers=H,
+        json={'worker_id': 'worker-1', 'token': task['token'], 'reason': 'Needs review'}).status_code == 200
+    with ThreadPoolExecutor(6) as pool:
+        tasks = list(pool.map(lambda i: (i, claim(client, run, f'fleet-{i}').json()['task']), range(6)))
+    reserved = [(i, task) for i, task in tasks if task]
+    assert len(reserved) == 2
+    calls = mock_model(monkeypatch)
+    for i, task in reserved:
+        body = payload(task, f'fleet-{i}')
+        response = client.post(path(run, task, 'assess'), headers=H, json=body)
+        assert response.status_code == 200, response.text
+        response = client.post(path(run, task, 'complete'), headers=H, json=body)
+        assert response.status_code == 200, response.text
+    assert len(calls) == 2
+    assert claim(client, run).status_code == 409
+    state = client.get(f"/api/capture/runs/{run['id']}").json()
+    assert (state['status'], state['finished'], state['saved'], state['review'], state['marked']) == ('completed', 4, 2, 1, 1)
+    assert state['error'] == 'Saved photo goal reached'
+
+
 def test_capture_reuses_saving_records_model_and_rejects_replay(client, monkeypatch):
     _, run = new_run(client, fallback_models=['other/discounted-model'])
     task = claim(client, run).json()['task']
@@ -100,6 +197,29 @@ def test_capture_reuses_saving_records_model_and_rejects_replay(client, monkeypa
     events = client.get(f"/api/capture/runs/{run['id']}/events").json()['events']
     assert events[0]['data']['model'] == 'other/discounted-model'
     assert events[0]['data']['usage']['cost'] == .002
+
+
+def test_persistent_black_frame_finishes_as_no_imagery_without_model(client, monkeypatch):
+    _, run = new_run(client)
+    task = claim(client, run).json()['task']
+    calls = mock_model(monkeypatch)
+    body = payload(task)
+    body.pop('image')
+    invalid = client.post(path(run, task, 'no-imagery'), headers=H, json={**body, 'page_url': 'https://example.com/'})
+    assert invalid.status_code == 422
+    response = client.post(path(run, task, 'no-imagery'), headers=H, json=body)
+    assert response.status_code == 200 and response.json()['status'] == 'no_imagery'
+    assert calls == []
+    shot = client.get(f"/api/shots/{task['shot']['id']}").json()
+    assert shot['status'] == 'no_imagery' and shot['capture_source'] == 'automation'
+    assert shot['result']['marked_at_url'] == body['page_url']
+    assert shot['result']['capture_run_id'] == run['id']
+    state = client.get(f"/api/capture/runs/{run['id']}").json()
+    assert state['finished'] == 1 and state['requests'] == 0 and state['status'] == 'running'
+    with session_scope() as s:
+        assert s.get(CaptureTask, uuid.UUID(task['shot']['id'])).status == 'finished'
+    assert client.post(path(run, task, 'no-imagery'), headers=H, json=body).status_code == 409
+    assert claim(client, run).json()['task']['shot']['id'] != task['shot']['id']
 
 
 def test_pause_revoke_resume_and_switch_model(client):
@@ -227,6 +347,55 @@ async def test_worker_observe_assess_drag_reinspect_and_save_without_browser():
     assert calls.count('complete') == 1 and calls.count('assess') == 2
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('outcomes, terminal', [
+    (['black', 'ready'], 'assess'), (['black'] * 3, 'no-imagery'),
+    (['redirect', 'ready'], 'assess'), (['unresolved', 'ready'], 'assess'),
+])
+async def test_worker_recovers_or_marks_persistent_black_frames(outcomes, terminal):
+    module = worker_module()
+    actions = []
+    observations = iter(outcomes)
+    class Desktop:
+        def start(self): actions.append('start')
+        def open(self, url): actions.append('open')
+        def observe(self):
+            actions.append('observe')
+            outcome = next(observations)
+            if outcome == 'black':
+                raise module.BlackLoadingFrame('https://www.google.com/maps/@-33.8,151.2,3a')
+            if outcome in ('redirect', 'unresolved'):
+                raise module.TransientNavigationError(outcome)
+            return 'image', 'url'
+    task = {'shot': {'id': str(uuid.uuid4()), 'code': 'shot', 'street': 'street', 'url': 'url'},
+            'token': 'x'*32, 'config': {'max_steps': 1, 'load_seconds': 0}}
+    calls = []
+    worker = module.Worker('http://localhost:8000', str(uuid.uuid4()), Desktop(), None)
+    async def api(path, body=None):
+        calls.append((path.split('/')[-1], body))
+        if path.endswith('/assess'):
+            return {'decision': dict(action='save', reason='okay', confidence=.99, start_x=.5,
+                start_y=.5, end_x=.5, end_y=.5, image_date=None), 'cost_usd': .004}
+        if path.endswith('/complete') or path.endswith('/no-imagery'):
+            worker.stopped.set()
+        if path.endswith('claim'):
+            return {'task': task}
+        return {'status': 'running'}
+    worker.api = api
+    async def delay(seconds): pass
+    worker.delay = delay
+    await worker.run()
+    expected_actions = ['start'] + [action for _ in outcomes for action in ('open', 'observe')]
+    assert actions == expected_actions
+    operations = [operation for operation, _ in calls]
+    assert operations.count(terminal) == 1
+    assert operations.count('assess') == (1 if terminal == 'assess' else 0)
+    assert operations.count('complete') == (1 if terminal == 'assess' else 0)
+    if terminal == 'no-imagery':
+        completion = next(body for operation, body in calls if operation == terminal)
+        assert completion['page_url'] == 'https://www.google.com/maps/@-33.8,151.2,3a'
+
+
 def test_cross_run_claims_do_not_duplicate_photos(client):
     job, first = new_run(client)
     second = client.post('/api/capture/runs', json={'job_id': job['id']}).json()
@@ -307,7 +476,7 @@ def test_pass_enters_manual_backlog_and_extension_can_resolve_it(client, monkeyp
     calls = mock_model(monkeypatch, action='pass')
     body = payload(task)
     result = client.post(path(run, task, 'assess'), headers=H, json=body)
-    assert result.json()['decision']['action'] == 'review'
+    assert result.json()['decision']['action'] == 'review', result.text
     assert client.post(path(run, task, 'complete'), headers=H, json=body).json()['status'] == 'review'
     assert len(calls) == 1
     manual = {'X-Maply': 'extension'}
@@ -343,7 +512,7 @@ def test_model_refusal_becomes_pass_instead_of_stopping_the_run(client, monkeypa
         lambda req: httpx.Response(200, json={'model': 'test/refusal', 'choices': [{'finish_reason': 'content_filter',
             'message': {'content': None, 'refusal': 'Unable to assess this view'}}], 'usage': {'cost': 0}})), **kw))
     result = client.post(path(run, task, 'assess'), headers=H, json=payload(task))
-    assert result.status_code == 200 and result.json()['decision']['action'] == 'review'
+    assert result.status_code == 200 and result.json()['decision']['action'] == 'review', result.text
     assert client.post(path(run, task, 'complete'), headers=H, json=payload(task)).json()['status'] == 'review'
     assert client.get(f"/api/capture/runs/{run['id']}").json()['status'] == 'running'
 
@@ -356,7 +525,7 @@ def worker_module():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('operation', ['status', 'heartbeat', 'claim', 'assess', 'complete'])
+@pytest.mark.parametrize('operation', ['status', 'heartbeat', 'claim', 'assess', 'complete', 'no-imagery'])
 async def test_worker_only_retries_status_and_heartbeat_after_disconnect(operation):
     module = worker_module()
     requests = []
@@ -376,6 +545,27 @@ async def test_worker_only_retries_status_and_heartbeat_after_disconnect(operati
             with pytest.raises(DesktopError, match='has not been repeated'):
                 await worker.api(path, {})
             assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['transport', 'server'])
+async def test_worker_safe_requests_keep_retrying_with_backoff(failure):
+    module = worker_module()
+    requests = []
+    def respond(req):
+        requests.append(req)
+        if len(requests) <= 2:
+            if failure == 'transport':
+                raise httpx.RemoteProtocolError('Disconnected', request=req)
+            return httpx.Response(503, json={'detail': 'Temporarily unavailable'})
+        return httpx.Response(200, json={'ok': True})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        worker = module.Worker('http://127.0.0.1:8000', str(uuid.uuid4()), None, client)
+        delays = []
+        async def delay(seconds): delays.append(seconds)
+        worker.delay = delay
+        assert await worker.api('runs/test') == {'ok': True}
+    assert len(requests) == 3 and delays == [2, 4]
 
 
 @pytest.mark.asyncio
@@ -422,6 +612,34 @@ def test_startup_failures_do_not_consume_visual_attempts_and_pause_reason_is_sav
         assert client.post(f"/api/capture/runs/{run['id']}/resume", json={}).status_code == 200
     state = client.get(f"/api/capture/runs/{run['id']}").json()
     assert state['finished'] == 0 and state['requests'] == 0
+
+
+@pytest.mark.parametrize('yolo', [False, True])
+def test_provider_rejections_do_not_send_photos_to_review(client, monkeypatch, yolo):
+    _, run = new_run(client, yolo=yolo)
+    original = httpx.AsyncClient
+    def reject(request):
+        return httpx.Response(403, json={'error': {'message': 'private provider details',
+            'metadata': {'limit_source': 'openrouter_key_limit'}}})
+    monkeypatch.setattr(capture.httpx, 'AsyncClient',
+        lambda **kw: original(transport=httpx.MockTransport(reject), **kw))
+    for _ in range(4):
+        task = claim(client, run).json()['task']
+        assert task is not None
+        result = client.post(path(run, task, 'assess'), headers=H, json=payload(task))
+        assert result.status_code == 409
+        assert 'API key spending limit reached' in result.json()['detail']
+        assert 'private provider details' not in result.text
+        if yolo:
+            with session_scope() as s:
+                t = s.get(CaptureTask, uuid.UUID(task['shot']['id']))
+                t.lease_until = capture.now() - timedelta(seconds=1)
+                s.commit()
+        else:
+            client.post(f"/api/capture/runs/{run['id']}/resume", json={})
+    state = client.get(f"/api/capture/runs/{run['id']}").json()
+    assert state['finished'] == state['review'] == 0
+    assert state['requests'] == 4
 
 
 @pytest.mark.parametrize('mode', ['15a', '16a'])
@@ -486,7 +704,144 @@ async def test_capture_preflight_reports_missing_permissions_before_any_browser_
         def permissions(self): return {'accessibility': True, 'screen_recording': False}
         def script(self, code): raise AssertionError('Browser input must wait for permissions')
     monkeypatch.setattr(module, 'MacChrome', Desktop)
+    monkeypatch.setattr(module, 'LinuxChrome', Desktop)
     monkeypatch.setattr(module.tempfile, 'gettempdir', lambda: str(tmp_path))
     monkeypatch.setattr(sys, 'argv', ['capture_worker.py', '--run', str(uuid.uuid4()), '--check'])
     with pytest.raises(DesktopError, match='screen recording'):
         await module.main()
+
+
+def test_yolo_runs_continue_after_failures_but_respect_goals_and_user_pauses(client, monkeypatch):
+    real_client = httpx.AsyncClient
+    _, run = new_run(client, yolo=True, max_cost_usd=.01)
+    url = f"/api/capture/runs/{run['id']}"
+    # Worker and supervisor failure pauses are conditional; YOLO notes them and keeps running.
+    state = client.post(url+'/pause', json={'reason': 'Clipboard failed', 'if_running': True}).json()
+    assert state['status'] == 'running' and 'Clipboard failed' in state['error']
+    assert run['id'] in [item['id'] for item in client.get('/api/capture/worker/runs', headers=H).json()['runs']]
+    task = claim(client, run).json()['task']
+    mock_model(monkeypatch, invalid=True)
+    assert client.post(path(run, task, 'assess'), headers=H, json=payload(task)).status_code == 409
+    assert client.get(url).json()['status'] == 'running'
+    # The model cannot stop a YOLO run: the photo goes to review instead.
+    monkeypatch.setattr(httpx, 'AsyncClient', real_client)
+    mock_model(monkeypatch, action='stop')
+    result = client.post(path(run, task, 'assess'), headers=H, json=payload(task))
+    assert result.status_code == 200 and result.json()['decision']['action'] == 'review', result.text
+    assert client.get(url).json()['status'] == 'running'
+    # The cost goal still pauses it, and so does the user.
+    task = claim(client, run).json()['task']
+    monkeypatch.setattr(httpx, 'AsyncClient', real_client)
+    mock_model(monkeypatch, cost=.02)
+    assert client.post(path(run, task, 'assess'), headers=H, json=payload(task)).status_code == 409
+    assert client.get(url).json()['status'] == 'paused'
+    _, run = new_run(client, yolo=True)
+    assert client.post(f"/api/capture/runs/{run['id']}/pause", json={}).json()['status'] == 'paused'
+
+
+@pytest.mark.asyncio
+async def test_yolo_worker_keeps_going_after_desktop_errors():
+    module = worker_module()
+    opened = []
+    class Desktop:
+        def start(self): pass
+        def open(self, url):
+            opened.append(url)
+            if len(opened) == 1:
+                raise DesktopError('Chrome window lost')
+            worker.stopped.set()
+            raise DesktopError('Worker interrupted')
+    task = {'shot': {'id': str(uuid.uuid4()), 'code': 'shot', 'street': 'street', 'url': 'url'},
+            'token': 'x'*32, 'config': {'max_steps': 3, 'load_seconds': 0}}
+    worker = module.Worker('http://localhost:8000', str(uuid.uuid4()), Desktop(), None)
+    async def api(path, body=None):
+        if path.endswith('claim'): return {'task': task}
+        return {'status': 'running', 'config': {'yolo': True}}
+    worker.api = api
+    async def delay(seconds): pass
+    worker.delay = delay
+    with pytest.raises(DesktopError, match='interrupted'):
+        await worker.run()
+    assert len(opened) == 2
+
+
+def test_recent_runs_span_jobs_newest_first(client):
+    job, first = new_run(client)
+    _, second = new_run(client, yolo=True)
+    runs = client.get('/api/capture/runs').json()['runs']
+    ids = [r['id'] for r in runs]
+    assert ids.index(second['id']) < ids.index(first['id'])
+    assert runs[ids.index(first['id'])]['job_name'] == job['name']
+    assert runs[ids.index(second['id'])]['config']['yolo'] is True
+
+
+def test_unassessed_expired_leases_do_not_send_photos_to_review(client):
+    _, run = new_run(client, yolo=True)
+    shot_id = None
+    for _ in range(5):
+        task = claim(client, run).json()['task']
+        assert task is not None
+        assert shot_id is None or task['shot']['id'] == shot_id
+        shot_id = task['shot']['id']
+        with session_scope() as s:
+            t = s.get(CaptureTask, uuid.UUID(shot_id))
+            t.lease_until = capture.now() - timedelta(seconds=1)
+    assert client.get(f"/api/capture/runs/{run['id']}").json()['finished'] == 0
+
+
+def test_run_reports_saved_review_and_marked_separately(client, monkeypatch):
+    _, run = new_run(client)
+    task = claim(client, run).json()['task']
+    client.post(path(run, task, 'review'), headers=H, json={**payload(task), 'reason': 'Needs review'})
+    task = claim(client, run).json()['task']
+    client.post(path(run, task, 'no-imagery'), headers=H, json=payload(task))
+    task = claim(client, run).json()['task']
+    mock_model(monkeypatch)
+    assert client.post(path(run, task, 'assess'), headers=H, json=payload(task)).status_code == 200
+    assert client.post(path(run, task, 'complete'), headers=H, json=payload(task)).status_code == 200
+    state = client.get(f"/api/capture/runs/{run['id']}").json()
+    assert state['finished'] == 3
+    assert (state['saved'], state['review'], state['marked']) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_navigation_write_failure_retries_same_shot_before_assessment():
+    from unittest.mock import AsyncMock
+    module = worker_module()
+    opened = []
+    class Desktop:
+        def open(self, url):
+            opened.append(url)
+            if len(opened) < 3:
+                raise module.TransientNavigationError('Address replacement failed')
+    worker = module.Worker('http://localhost:8000', str(uuid.uuid4()), Desktop(), None)
+    worker.api = AsyncMock(return_value={'ok': True})
+    worker.delay = AsyncMock()
+    await worker.open_shot('worker/run/shot', {'code': 'shot', 'url': 'planned'}, {'token': 'test'})
+    assert opened == ['planned'] * 3
+    assert [call.args[0] for call in worker.api.await_args_list] == ['worker/run/shot/heartbeat'] * 3
+    assert [call.args[0] for call in worker.delay.await_args_list] == [2, 4]
+
+
+def test_navigation_repair_only_requeues_unassessed_reviews_and_is_idempotent(client):
+    from app.models import Shot
+    _, run = new_run(client)
+    task = claim(client, run).json()['task']
+    reason = 'Three interrupted attempts; manual review required'
+    client.post(path(run, task, 'review'), headers=H, json={**payload(task), 'reason': reason})
+    assessed = claim(client, run).json()['task']
+    client.post(path(run, assessed, 'review'), headers=H, json={**payload(assessed), 'reason': 'Real visual uncertainty'})
+    spec = importlib.util.spec_from_file_location('repair', Path(__file__).parents[2] / 'scripts/cloud/repair_navigation_reviews.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    rid = uuid.UUID(run['id'])
+    assert module.repair(rid) == {'eligible': 1, 'requeued': 0}
+    result = module.repair(rid, True)
+    assert result['requeued'] == 1 and Path(result['receipt']).is_file()
+    assert module.repair(rid, True) == {'eligible': 0, 'requeued': 0}
+    with session_scope() as s:
+        sh = s.get(Shot, uuid.UUID(task['shot']['id']))
+        assert sh.status == 'pending' and 'manual_review' not in sh.flags
+        assert s.get(CaptureTask, sh.id).attempts == 0
+        assert s.get(CaptureTask, uuid.UUID(assessed['shot']['id'])).status == 'review'
+        assert s.get(CaptureRun, rid).finished == 1

@@ -1,0 +1,16 @@
+[Unit]
+Description=Maply dedicated Chrome desktop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=maply
+Group=maply
+Environment=HOME=/home/maply
+ExecStart=/usr/bin/dbus-run-session -- /usr/local/bin/maply-desktop
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

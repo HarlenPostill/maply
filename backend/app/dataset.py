@@ -115,7 +115,7 @@ def export(s: Session, job: Job) -> dict:
                     "source_url": r.get("final_url"),
                 },
                 "near_intersection_m": sh.near_node_m,
-                "imagery_date": {"value": r.get("image_date_iso"), "shown_as": r.get("image_date")},
+                "imagery_date": {"value": r.get("image_date_iso"), "shown_as": r.get("image_date"), "type": "available" if r.get("image_date") else "not_available"},
                 "quality": {"status": sh.status, "flags": list(sh.flags or []), "reviewed": sh.status in ("accepted", "retake")},
                 "labels": labels_for(sh),
                 "tagging": task_dict(sh),
