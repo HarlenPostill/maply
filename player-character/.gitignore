@@ -1,0 +1,4 @@
+ios/build/
+*.blend1
+renders/clip_*
+renders/z.png

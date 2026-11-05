@@ -1,0 +1,8 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ALWAYS"
+# Postgres must finish its shutdown checkpoint before the volume detaches.
+drainingSeconds = 60

@@ -1,0 +1,379 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01DD0CBE981A3ABF3E6658A2 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 3B231C9E598AD3283316B96D /* Shaders.metal */; };
+		15873A04B91754488A28A62C /* Metal4Renderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F64A2D8700F98CBB385B63C /* Metal4Renderer.swift */; };
+		2959DDDD5498FEB107BAD263 /* T_Shoes_Mustard.png in Resources */ = {isa = PBXBuildFile; fileRef = 52358CFBE082D8151C68FA3D /* T_Shoes_Mustard.png */; };
+		3998E2DAA9A827115DCACE7B /* T_Shoes_Terracotta.png in Resources */ = {isa = PBXBuildFile; fileRef = 6B89B345288DB05CAC6945E9 /* T_Shoes_Terracotta.png */; };
+		5EB79D709773B4E14A4073CB /* T_Shoes_Olive.png in Resources */ = {isa = PBXBuildFile; fileRef = C906952BB53618F52ADDBE39 /* T_Shoes_Olive.png */; };
+		8A5A886494F53A80CD823DE5 /* T_Top_Daisy.png in Resources */ = {isa = PBXBuildFile; fileRef = 0D96212F4D7760A67EE59CF3 /* T_Top_Daisy.png */; };
+		93A95BE2184574FE30586EF9 /* player.glb in Resources */ = {isa = PBXBuildFile; fileRef = ED0FDBC23949D6D60ADF252B /* player.glb */; };
+		970985E731BD0314B3C0372C /* GLB.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEFA02C2D57952DDEF428ADA /* GLB.swift */; };
+		A63B166A6B603512AC4D1DD5 /* SimulatorRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 678AEFEF61C4C47294DBFA0D /* SimulatorRenderer.swift */; };
+		B9CE80C6C3F5443296F82FA9 /* PlayerDemoApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F90D2368439EB26A6CCD91B /* PlayerDemoApp.swift */; };
+		E22FE36B52CFFA4FE2A93896 /* Wardrobe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AEE89F1DBF642E66F8492C4 /* Wardrobe.swift */; };
+		F2EFB15B79A5331180DB1554 /* Animator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FD28BCD07EB3C9659D8E86A /* Animator.swift */; };
+		F513B31EC5333E0966670147 /* T_Shoes_Blue.png in Resources */ = {isa = PBXBuildFile; fileRef = 3429EC9235E279DC08C9C04C /* T_Shoes_Blue.png */; };
+		F7B50396C3D2D86D92E581D4 /* Scene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F70EB4C2BE42D66D6593112 /* Scene.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0AEE89F1DBF642E66F8492C4 /* Wardrobe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wardrobe.swift; sourceTree = "<group>"; };
+		0D96212F4D7760A67EE59CF3 /* T_Top_Daisy.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Top_Daisy.png; sourceTree = "<group>"; };
+		0FD28BCD07EB3C9659D8E86A /* Animator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Animator.swift; sourceTree = "<group>"; };
+		3429EC9235E279DC08C9C04C /* T_Shoes_Blue.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Blue.png; sourceTree = "<group>"; };
+		3B231C9E598AD3283316B96D /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		4F70EB4C2BE42D66D6593112 /* Scene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scene.swift; sourceTree = "<group>"; };
+		52358CFBE082D8151C68FA3D /* T_Shoes_Mustard.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Mustard.png; sourceTree = "<group>"; };
+		678AEFEF61C4C47294DBFA0D /* SimulatorRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorRenderer.swift; sourceTree = "<group>"; };
+		6B89B345288DB05CAC6945E9 /* T_Shoes_Terracotta.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Terracotta.png; sourceTree = "<group>"; };
+		8F64A2D8700F98CBB385B63C /* Metal4Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Metal4Renderer.swift; sourceTree = "<group>"; };
+		8F90D2368439EB26A6CCD91B /* PlayerDemoApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerDemoApp.swift; sourceTree = "<group>"; };
+		BEFA02C2D57952DDEF428ADA /* GLB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GLB.swift; sourceTree = "<group>"; };
+		C906952BB53618F52ADDBE39 /* T_Shoes_Olive.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Olive.png; sourceTree = "<group>"; };
+		ED0FDBC23949D6D60ADF252B /* player.glb */ = {isa = PBXFileReference; path = player.glb; sourceTree = "<group>"; };
+		FF7F6255BEA2FA409BF3F54B /* PlayerDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PlayerDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0CAF3887EF34850199ACC305 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				0FD28BCD07EB3C9659D8E86A /* Animator.swift */,
+				BEFA02C2D57952DDEF428ADA /* GLB.swift */,
+				8F64A2D8700F98CBB385B63C /* Metal4Renderer.swift */,
+				8F90D2368439EB26A6CCD91B /* PlayerDemoApp.swift */,
+				4F70EB4C2BE42D66D6593112 /* Scene.swift */,
+				3B231C9E598AD3283316B96D /* Shaders.metal */,
+				678AEFEF61C4C47294DBFA0D /* SimulatorRenderer.swift */,
+				0AEE89F1DBF642E66F8492C4 /* Wardrobe.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		5C2169A3029DE01152845CDF = {
+			isa = PBXGroup;
+			children = (
+				FE66A33EE78157D858BDDDF6 /* PlayerDemo */,
+				DC602BF7B20330808258E6B3 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C4743B88A2E25CC45F164FDB /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				ED0FDBC23949D6D60ADF252B /* player.glb */,
+				3429EC9235E279DC08C9C04C /* T_Shoes_Blue.png */,
+				52358CFBE082D8151C68FA3D /* T_Shoes_Mustard.png */,
+				C906952BB53618F52ADDBE39 /* T_Shoes_Olive.png */,
+				6B89B345288DB05CAC6945E9 /* T_Shoes_Terracotta.png */,
+				0D96212F4D7760A67EE59CF3 /* T_Top_Daisy.png */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		DC602BF7B20330808258E6B3 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				FF7F6255BEA2FA409BF3F54B /* PlayerDemo.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FE66A33EE78157D858BDDDF6 /* PlayerDemo */ = {
+			isa = PBXGroup;
+			children = (
+				C4743B88A2E25CC45F164FDB /* Resources */,
+				0CAF3887EF34850199ACC305 /* Sources */,
+			);
+			path = PlayerDemo;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		404DAEC29E921458C476D837 /* PlayerDemo */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 11F4DBE40169580340EDF2F2 /* Build configuration list for PBXNativeTarget "PlayerDemo" */;
+			buildPhases = (
+				E815E106CE49360FFC8B1900 /* Sources */,
+				F0BBE2C84D52A69884465300 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PlayerDemo;
+			packageProductDependencies = (
+			);
+			productName = PlayerDemo;
+			productReference = FF7F6255BEA2FA409BF3F54B /* PlayerDemo.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		347CF060ED2764A1B5ECA961 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					404DAEC29E921458C476D837 = {
+						DevelopmentTeam = Z43R7TX7Z9;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = A4DD9B35BE7DD04C9FC5BAFE /* Build configuration list for PBXProject "PlayerDemo" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5C2169A3029DE01152845CDF;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = DC602BF7B20330808258E6B3 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				404DAEC29E921458C476D837 /* PlayerDemo */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F0BBE2C84D52A69884465300 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F513B31EC5333E0966670147 /* T_Shoes_Blue.png in Resources */,
+				2959DDDD5498FEB107BAD263 /* T_Shoes_Mustard.png in Resources */,
+				5EB79D709773B4E14A4073CB /* T_Shoes_Olive.png in Resources */,
+				3998E2DAA9A827115DCACE7B /* T_Shoes_Terracotta.png in Resources */,
+				8A5A886494F53A80CD823DE5 /* T_Top_Daisy.png in Resources */,
+				93A95BE2184574FE30586EF9 /* player.glb in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		E815E106CE49360FFC8B1900 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F2EFB15B79A5331180DB1554 /* Animator.swift in Sources */,
+				970985E731BD0314B3C0372C /* GLB.swift in Sources */,
+				15873A04B91754488A28A62C /* Metal4Renderer.swift in Sources */,
+				B9CE80C6C3F5443296F82FA9 /* PlayerDemoApp.swift in Sources */,
+				F7B50396C3D2D86D92E581D4 /* Scene.swift in Sources */,
+				01DD0CBE981A3ABF3E6658A2 /* Shaders.metal in Sources */,
+				A63B166A6B603512AC4D1DD5 /* SimulatorRenderer.swift in Sources */,
+				E22FE36B52CFFA4FE2A93896 /* Wardrobe.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0D2799FB003D1D0F1C5A6D60 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = Z43R7TX7Z9;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		653C13DDE0E1EB88ABD91743 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.harlenpostill.PlayerDemo;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C4B92CFC8014A6D8FC95FDD4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = Z43R7TX7Z9;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F653DD143765059B84B4D38E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.harlenpostill.PlayerDemo;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		11F4DBE40169580340EDF2F2 /* Build configuration list for PBXNativeTarget "PlayerDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F653DD143765059B84B4D38E /* Debug */,
+				653C13DDE0E1EB88ABD91743 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A4DD9B35BE7DD04C9FC5BAFE /* Build configuration list for PBXProject "PlayerDemo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C4B92CFC8014A6D8FC95FDD4 /* Debug */,
+				0D2799FB003D1D0F1C5A6D60 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 347CF060ED2764A1B5ECA961 /* Project object */;
+}

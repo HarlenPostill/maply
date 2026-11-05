@@ -1,0 +1,25 @@
+name: PlayerDemo
+options:
+  bundleIdPrefix: com.harlenpostill
+  deploymentTarget: { iOS: "26.0" }
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SUPPORTS_MACCATALYST: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: Z43R7TX7Z9
+targets:
+  PlayerDemo:
+    type: application
+    platform: iOS
+    sources:
+      - path: PlayerDemo/Sources
+      - path: PlayerDemo/Resources
+        buildPhase: resources

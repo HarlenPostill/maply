@@ -1,15 +1,21 @@
 <img src="assets/icon.svg" width="64" height="64" alt="">
 
-# maply
+# maply tagger
 
 Review the completed City of Sydney footpath dataset locally. Check uncertain
 annotations against the original photos, request independent AI second opinions,
 and recover missing views with the Chrome extension. Review batches automatically
 save AI results; single-photo reviews retain manual confirmation.
 
+Run every command in this document from this `tagger/` folder. The tagger is the
+source of truth for photos and annotations. To push curated results to the
+production database, see [the atlas](../atlas/README.md): `cd ../atlas && uv run
+python -m atlas publish`. The local `atlas` Compose service below is unrelated: it
+only writes visualiser snapshots.
+
 ## Start
 
-This checkout now runs against the complete local dataset in `data/` and local
+The tagger runs against the complete local dataset in `data/` and local
 PostGIS. Port 8000 serves the local app directly. No SSH tunnel, capture worker
 server, VPS, or public gateway is needed. Keep the existing `.env`, which selects
 the restored `maply-local-final_pgdata` database volume. Automatic paid tagging

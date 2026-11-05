@@ -1,23 +1,35 @@
-# Maply local development
+# Maply
 
-This checkout, `/Users/harlenpostill/.t3/projects/maply`, is the active app and
-source workspace. The user has returned Maply to full local development and is
-retiring the temporary workers and final VPS. Work locally unless explicitly
-asked to work on a remote server.
+This repository has two projects:
+
+- `tagger/`: the Maply capture, tagging and review system and its full local
+  dataset (`tagger/data/`, photos and annotations). Everything below about
+  running the app, data and backups refers to `tagger/`. Run its commands from
+  that folder.
+- `atlas/`: the production database for consumer products (Petal Path, wheelchair
+  routing) on Railway. It holds facts only: no photos, confidence or evidence text. It
+  is fed one way by `cd atlas && uv run python -m atlas publish`, which reads the
+  tagger database read-only. See `atlas/README.md`. Atlas tests need a disposable
+  database whose name contains `test`. Never point them at production.
+
+`/Users/harlenpostill/.t3/projects/maply` is the active app and source workspace.
+The user has returned Maply to full local development and retired the temporary
+workers and final VPS. Work locally unless explicitly asked to work on a remote
+server. The Railway atlas is the only production deployment.
 
 ## Run the app
 
-- `./scripts/dev.sh` builds and starts local PostGIS and the backend with Python
+- From `tagger/`, `./scripts/dev.sh` builds and starts local PostGIS and the backend with Python
   reload, then runs Vite at `http://127.0.0.1:5173` with frontend hot reload.
 - The local API and built app use `http://127.0.0.1:8000`. This is a Docker
   listener, never an SSH tunnel. Extension and desktop capture requests go here.
 - `docker compose up -d --build` runs the built app without development reload.
 - `docker compose stop` stops the local containers. Docker restarts running
   containers when its engine restarts.
-- The root `.env` selects Compose project `maply-local-final` so it retains the
+- `tagger/.env` selects Compose project `maply-local-final` so it retains the
   verified database volume `maply-local-final_pgdata`. Preserve this setting.
 - PostGIS binds to `127.0.0.1:5433`. The app binds to loopback only. Host backend
-  settings in `backend/.env` point at this database and this checkout's `data/`.
+  settings in `backend/.env` point at this database and `tagger/data/`.
 - Automatic paid tagging is disabled. Capture uses a local Chrome desktop and
   requires an explicit run and worker. No cloud supervisor is required.
 - The primary UI reviews this completed job. The separate review worker only
@@ -26,16 +38,16 @@ asked to work on a remote server.
   Single-photo reviews retain manual confirmation. Record automatic acceptance
   honestly in provenance. Do not start paid review batches for implementation testing.
   Restart pauses unfinished batches; tests use stubbed provider responses.
-- The local `atlas` Compose service publishes read-only accessibility snapshots
-  into `data/accessibility/` every 30 seconds. Both local ports serve them.
+- The local `atlas` Compose service (unrelated to the `atlas/` project) publishes
+  read-only accessibility snapshots into `tagger/data/accessibility/` every 30 seconds. Both local ports serve them.
 
 ## Data and backups
 
-The current dataset lives in this checkout's `data/jobs/`. It includes 52,483
+The current dataset lives in `tagger/data/jobs/`. It includes 52,483
 saved photos and 52,457 annotations from the completed cloud runs. The full
 photo SHA256, thumbnail, and annotation check passed after the local cutover.
-Run `python3 scripts/verify_local_copy.py .` to verify current database references.
-Its receipt is `data/local-verification.json`.
+From `tagger/`, run `python3 scripts/verify_local_copy.py .` to verify current database references.
+Its receipt is `tagger/data/local-verification.json`.
 
 The user explicitly requested one source of truth and removal of the old backup
 sets on 4 November 2026. The earlier cloud snapshots, restored workspace archive,

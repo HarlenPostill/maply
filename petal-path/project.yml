@@ -1,0 +1,54 @@
+name: PetalPath
+options:
+  bundleIdPrefix: com.harlenpostill
+  deploymentTarget: { iOS: "26.0" }
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_UILaunchScreen_Generation: YES
+    INFOPLIST_KEY_CFBundleDisplayName: Petal Path
+    INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Petal Path puts your character on the map where you are.
+    INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+    INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait
+    TARGETED_DEVICE_FAMILY: "1,2"
+    SUPPORTS_MACCATALYST: YES
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: Z43R7TX7Z9
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"   # tile meshing is unusably slow unoptimised
+targets:
+  PetalPath:
+    type: application
+    platform: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harlenpostill.PetalPath
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    sources:
+      - path: PetalPath/Sources
+      - path: PetalPath/Resources
+        buildPhase: resources
+  PetalPathTests:
+    type: bundle.unit-test
+    platform: iOS
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harlenpostill.PetalPathTests
+        GENERATE_INFOPLIST_FILE: YES
+    sources:
+      - path: PetalPathTests
+    dependencies:
+      - target: PetalPath
+schemes:
+  PetalPath:
+    build:
+      targets:
+        PetalPath: all
+        PetalPathTests: [test]
+    test:
+      targets: [PetalPathTests]
