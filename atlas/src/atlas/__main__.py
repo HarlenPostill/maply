@@ -1,19 +1,22 @@
-"""uv run python -m atlas {migrate,publish,verify,status}
+"""uv run python -m atlas {migrate,publish,verify,status,serve,designations}
 
-migrate  Apply pending schema migrations to ATLAS_DATABASE_URL.
-publish  Extract the tagger dataset (read-only) and replace the survey layer.
-verify   Compare the production database with a fresh tagger extract.
-status   Print the production database summary.
+migrate       Apply pending schema migrations to ATLAS_DATABASE_URL.
+publish       Extract the tagger dataset (read-only) and replace the survey layer.
+verify        Compare the production database with a fresh tagger extract.
+status        Print the production database summary.
+serve         Run the read-only route preview API (see ROUTING_API.md).
+designations  Copy per-way OSM street classes from the tagger street file (read-only) into var/.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from pathlib import Path
 
 import psycopg
 
-from atlas.config import COVERAGE_FILE, source_url, target_url
+from atlas.config import COVERAGE_FILE, DESIGNATIONS_FILE, STREET_FILE, source_url, target_url
 from atlas.extract import extract
 from atlas.migrate import migrate
 from atlas.publish import publish
@@ -46,7 +49,30 @@ def main(argv=None) -> int:
     p.add_argument('--dry-run', action='store_true', help='extract and print stats without connecting to production')
     sub.add_parser('verify')
     sub.add_parser('status')
+    p = sub.add_parser('serve')
+    p.add_argument('--host', default='127.0.0.1')
+    p.add_argument('--port', type=int, default=8765)
+    p.add_argument('--refresh-s', type=float, default=600, help='how often to check atlas content, designations and the date for changes')
+    p.add_argument('--designations', type=Path, default=DESIGNATIONS_FILE)
+    p = sub.add_parser('designations')
+    p.add_argument('--street-file', type=Path, default=STREET_FILE)
+    p.add_argument('--output', type=Path, default=DESIGNATIONS_FILE)
     args = parser.parse_args(argv)
+
+    if args.command == 'designations':
+        from atlas.routing.designation import build
+        print(json.dumps(build(args.street_file, args.output), indent=2))
+        return 0
+    if args.command == 'serve':
+        import logging
+        from atlas.routing.api import serve
+        from atlas.routing.service import database_service
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s %(name)s %(levelname)s %(message)s')
+        if not args.designations.is_file():
+            print(f'No designations file at {args.designations}: no street gets the pedestrian/shared allowance. '
+                  'Run `python -m atlas designations` to create it.', file=sys.stderr)
+        serve(database_service(target_url(), args.designations), args.host, args.port, args.refresh_s)
+        return 0
 
     if args.command == 'publish' and args.dry_run:
         print(json.dumps(read_dataset().stats(), indent=2))

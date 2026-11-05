@@ -9,6 +9,8 @@ REPO = ROOT.parent
 MIGRATIONS = ROOT / 'migrations'
 TAGGER = REPO / 'tagger'
 COVERAGE_FILE = TAGGER / 'config' / 'city_of_sydney_approx.geojson'
+STREET_FILE = TAGGER / 'data' / 'osm' / 'city_of_sydney_streets.geojson'
+DESIGNATIONS_FILE = ROOT / 'var' / 'osm_way_designations.json'
 DEFAULT_SOURCE_URL = 'postgresql://maply:maply@127.0.0.1:5433/maply'
 
 

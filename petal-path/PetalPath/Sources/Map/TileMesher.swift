@@ -49,6 +49,7 @@ struct TileMesher {
     private static let maxEdge: Float = 48
     private static let wanted: Set<String> = ["building", "landcover", "landuse", "park", "transportation",
                                               "transportation_name", "water", "waterway"]
+    private let id: TileID
     private let toMetres: Float       // tile units to Mercator metres
     private let ground: Float         // Mercator metres to real metres
     private let tileSize = Float(TileID.size)
@@ -69,6 +70,7 @@ struct TileMesher {
     }
 
     private init(id: TileID) {
+        self.id = id
         let lat = Mercator.unproject(id.centre).latitude
         ground = Float(Mercator.groundScale(latitude: lat))
         toMetres = Float(TileID.size) / 4096
@@ -377,29 +379,127 @@ struct TileMesher {
     /// proportions, staying taller than their neighbours: 6 m becomes 15 m and 200 m becomes 61 m.
     static func toyHeight(_ h: Float) -> Float { 6 + 3.9 * sqrt(max(h, 0)) }
 
+    /// One polygon from the building layer, before it is known which others it belongs with.
+    private struct Footprint {
+        var polygon: Polygon, top: Float, raw: Float, area: Float
+        var lo: SIMD2<Float>, hi: SIMD2<Float>
+        var crossing: UInt32?      // set when it straddles a tile edge
+    }
+
+    /// OpenStreetMap maps a tower on a podium as overlapping parts, so anything that truly overlaps is
+    /// one building: it gets one colour and one height variation, and its parts read as steps.
     private mutating func buildings(_ l: MVTLayer) {
         let scale = l.scale(toMetres)
+        let tile = SIMD2<Float>(repeating: tileSize)
+        var prints: [Footprint] = []
         for f in l.features where f.kind == .polygon {
             if l.tag(f, "hide_3d")?.bool == true { continue }
             let top = Self.toyHeight(Float(l.tag(f, "render_height")?.number ?? 6))
             let raw = Float(l.tag(f, "render_min_height")?.number ?? 0)
-            let bottom: Float = raw > 1 ? min(Self.toyHeight(raw), top - 1) : -2
             for p in l.polygons(f, scale: scale) {
                 let area = p.area * ground * ground
                 guard area > 8, let ring = p.rings.first else { continue }
-                var c = ring.reduce(SIMD2<Float>.zero, +) / Float(ring.count)
-                c = (c * 2).rounded(.down)
-                let hash = mix32(UInt32(truncatingIfNeeded: Int(c.x) &* 73856093 ^ Int(c.y) &* 19349663))
-                let wall = Self.walls[Int(hash % UInt32(Self.walls.count))]
-                let roof = Self.roofs[Int((hash >> 8) % UInt32(Self.roofs.count))]
-                // Slightly varied heights stop neighbouring blocks merging into one slab.
-                let lift = top * (1 + Float(hash >> 24) / 255 * 0.12)
-                for r in p.rings { walls(r, bottom: bottom, top: lift, colour: wall) }
-                self.roof(p, top: lift, area: area, colour: roof)
-                shadow(ring, height: raw > 1 ? 0 : lift)
-                for r in p.rings { occupyArea(r) }
+                let (lo, hi) = bounds(ring)
+                // Wholly in the buffer zone means the neighbouring tile owns it.
+                guard hi.x > 0, hi.y > 0, lo.x < tile.x, lo.y < tile.y else { continue }
+                prints.append(Footprint(polygon: p, top: top, raw: raw, area: area, lo: lo, hi: hi,
+                                        crossing: Self.crossingKey(ring, tile: id, tileSize: tileSize)))
             }
         }
+
+        var parent = Array(prints.indices)
+        func root(_ i: Int) -> Int {
+            var r = i
+            while parent[r] != r { parent[r] = parent[parent[r]]; r = parent[r] }
+            return r
+        }
+        var cells: [SIMD2<Int32>: [Int]] = [:]
+        for (i, b) in prints.enumerated() {
+            let c0 = SIMD2<Int32>(b.lo / 64), c1 = SIMD2<Int32>(b.hi / 64)
+            for y in c0.y...c1.y { for x in c0.x...c1.x { cells[SIMD2(x, y), default: []].append(i) } }
+        }
+        var joined = Set<SIMD2<Int>>()
+        for list in cells.values where list.count > 1 {
+            for (n, a) in list.enumerated() {
+                for b in list[(n + 1)...] where root(a) != root(b) {
+                    let pair = SIMD2(min(a, b), max(a, b))
+                    guard !joined.contains(pair) else { continue }
+                    joined.insert(pair)
+                    let x = prints[a], y = prints[b]
+                    guard x.lo.x < y.hi.x, y.lo.x < x.hi.x, x.lo.y < y.hi.y, y.lo.y < x.hi.y else { continue }
+                    if Self.overlaps(x.polygon.rings[0], y.polygon.rings[0]) { parent[root(a)] = root(b) }
+                }
+            }
+        }
+
+        // A straddling group is named by where it crosses the tile edge, the one thing both tiles agree on.
+        var named: [Int: UInt32] = [:], fallback: [Int: UInt32] = [:], members: [Int: Int] = [:]
+        for (i, b) in prints.enumerated() {
+            let r = root(i)
+            members[r, default: 0] += 1
+            if let k = b.crossing { named[r] = min(named[r] ?? .max, k) }
+            let c = (b.polygon.rings[0].reduce(SIMD2<Float>.zero, +) / Float(b.polygon.rings[0].count)).rounded(.down)
+            fallback[r] = min(fallback[r] ?? .max, mix32(UInt32(truncatingIfNeeded: (id.x + Int(c.x)) &* 73856093 ^ (id.y + Int(c.y)) &* 19349663)))
+        }
+
+        for (i, b) in prints.enumerated() {
+            let r = root(i), hash = named[r] ?? fallback[r]!
+            let wall = Self.walls[Int(hash % UInt32(Self.walls.count))]
+            let roof = Self.roofs[Int((hash >> 8) % UInt32(Self.roofs.count))]
+            // Slightly varied heights stop neighbouring blocks merging into one slab.
+            let lift = 1 + Float(hash >> 24) / 255 * 0.12
+            let top = b.top * lift
+            let bottom: Float = b.raw > 1 ? min(Self.toyHeight(b.raw) * lift, top - 1) : -2
+            for ring in b.polygon.rings { walls(ring, bottom: bottom, top: top, colour: wall) }
+            // A pitched roof would poke through its other parts, or differ between two tiles.
+            self.roof(b.polygon, top: top, area: b.area, colour: roof, pitched: members[r] == 1 && b.crossing == nil)
+            shadow(b.polygon.rings[0], height: b.raw > 1 ? 0 : top)
+            for ring in b.polygon.rings { occupyArea(ring) }
+        }
+    }
+
+    /// True when the rings share real area. Touching along a wall, as terraces do, does not count.
+    static func overlaps(_ a: [SIMD2<Float>], _ b: [SIMD2<Float>]) -> Bool {
+        let (small, large) = abs(signedArea(a)) < abs(signedArea(b)) ? (a, b) : (b, a)
+        let c = small.reduce(SIMD2<Float>.zero, +) / Float(small.count)
+        func inside(_ q: SIMD2<Float>) -> Bool {
+            var hit = false
+            var j = large.count - 1
+            for i in 0..<large.count {
+                let p = large[i], o = large[j]
+                if (p.y > q.y) != (o.y > q.y), q.x < (o.x - p.x) * (q.y - p.y) / (o.y - p.y) + p.x { hit.toggle() }
+                j = i
+            }
+            return hit
+        }
+        if inside(c) { return true }
+        // Step each corner 2 m inwards, clear of any shared wall.
+        return small.contains { v in
+            let d = c - v, l = simd_length(d)
+            return l > 2 && inside(v + d / l * 2)
+        }
+    }
+
+    /// Identifies a ring by where it crosses its tile's edges, in whole-map units, so the same building
+    /// gets the same key from the tiles on either side. Nil when it crosses no edge.
+    static func crossingKey(_ ring: [SIMD2<Float>], tile: TileID, tileSize: Float) -> UInt32? {
+        var best: UInt32?
+        func consider(_ line: Int, _ axis: Int, _ along: Float) {
+            let k = mix32(UInt32(truncatingIfNeeded: line &* 40503 ^ axis &* 7919 ^ Int((along / 4).rounded()) &* 2654435761))
+            best = min(best ?? .max, k)
+        }
+        for i in 0..<ring.count {
+            let a = ring[i], b = ring[(i + 1) % ring.count]
+            for (edge, line) in [(Float(0), tile.x), (tileSize, tile.x + 1)] where (a.x - edge) * (b.x - edge) < 0 {
+                let y = a.y + (b.y - a.y) * (edge - a.x) / (b.x - a.x)
+                if y >= -40, y <= tileSize + 40 { consider(line, 0, y + Float(tile.y % 1024) * tileSize) }
+            }
+            for (edge, line) in [(Float(0), tile.y), (tileSize, tile.y + 1)] where (a.y - edge) * (b.y - edge) < 0 {
+                let x = a.x + (b.x - a.x) * (edge - a.y) / (b.y - a.y)
+                if x >= -40, x <= tileSize + 40 { consider(line, 1, x + Float(tile.x % 1024) * tileSize) }
+            }
+        }
+        return best
     }
 
     private mutating func occupyArea(_ r: [SIMD2<Float>]) {
@@ -427,9 +527,9 @@ struct TileMesher {
         }
     }
 
-    private mutating func roof(_ p: Polygon, top: Float, area: Float, colour: SIMD3<UInt8>) {
+    private mutating func roof(_ p: Polygon, top: Float, area: Float, colour: SIMD3<UInt8>, pitched: Bool) {
         let ring = p.rings[0]
-        if p.rings.count == 1, area < 900, top < 30, isConvex(ring) {
+        if pitched, p.rings.count == 1, area < 900, top < 30, isConvex(ring) {
             let c = ring.reduce(SIMD2<Float>.zero, +) / Float(ring.count)
             let rise = min(9, sqrt(area) * 0.3)
             if ring.count == 4 {

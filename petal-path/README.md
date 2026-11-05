@@ -40,6 +40,10 @@ Things in the data that are easy to get wrong:
 - `suburb` and `neighbourhood` landuse blanket whole tiles and must be skipped.
 - Sydney Harbour is not class `ocean`, so every `water` polygon is treated the same.
 - Buildings arrive as multipolygons, many footprints to a feature, so colour is chosen per footprint.
+- A tower on a podium is overlapping `building:part` footprints. These are grouped with union-find so they read as
+  one building. `TileMesher.overlaps` keeps terraces, which only share a wall, separate.
+- Tiles repeat each other's edges. A footprint wholly in the buffer belongs to the neighbour and is skipped. One
+  straddling the edge is drawn by both, so its look comes from `crossingKey`, which both tiles compute the same.
 - Tiles overlap their neighbours by a buffer. Ground is painted layer by layer across all tiles to keep this hidden.
 
 ## Rendering
@@ -53,7 +57,9 @@ Things in the data that are easy to get wrong:
 - Ground patterns use `PatternAnchor`, which holds the Mercator scale still. Using the player's own latitude
   makes every pattern slide under them.
 - Building shadows are painted quads. A stencil test stops overlapping shadows doubling up.
-- Buildings between the camera and the player dither away.
+- Buildings between the camera and the player dither away, as do buildings beside a low camera.
+- The sky is a full-screen procedural pass drawn first. Its horizon colour is also the fog colour, set in both
+  `GameScene.sky` and `skyColour`. Noise is skipped below the horizon, where the map covers it anyway.
 
 Scale is deliberately not literal. `GameScene.playerScale` makes the character 30 m tall, like a Pokémon Go avatar,
 and `TileMesher.toyHeight` squashes towers so 200 m becomes 61 m. Roads are wider than life for the same reason.
@@ -63,8 +69,8 @@ Walk speed follows from the scale: `walkSpeed` × 30 keeps the feet locked, abou
 
 `LocationSource` has two implementations. `JoystickLocationSource` is the fake location, starting at Circular Quay.
 `GPSLocationSource` follows the device, easing between fixes and ignoring moves within GPS error. The HUD button
-switches between them and the choice is saved. The joystick is hidden while following the device, and the player stays
-put until the first fix arrives. At real walking pace the walk cycle plays at its slowest rate, so her feet outrun the ground.
+switches between them and the choice is saved. The player stays put until the first fix arrives. The joystick also works
+while following the device: it adds a wander on top of the real position, and "Back to me" clears it. At real walking pace the walk cycle plays at its slowest rate, so her feet outrun the ground.
 
 ## Testing
 
@@ -76,9 +82,29 @@ The Simulator has no Metal 4. To run the real renderer, build the Mac Catalyst d
       PP_AUTOWALK=3.14 PP_FAST=1 PP_LOG_POSITION=1 \
       build/cat/Build/Products/Debug-maccatalyst/PetalPath.app/Contents/MacOS/PetalPath
 
-Debug hooks: `PP_START=lat,lon`, `PP_AUTOWALK=<radians from screen-up>`, `PP_FAST=1`, `PP_OUTFIT=girl`, `PP_YAW=<radians>`,
+Debug hooks: `PP_START=lat,lon`, `PP_AUTOWALK=<radians from screen-up>`, `PP_FAST=1`, `PP_OUTFIT=girl`, `PP_YAW=<radians>`, `PP_PITCH=<radians>`,
 `PP_SETTINGS=1`, `PP_LOG_POSITION=1`. Dragging in the Catalyst window turns the camera, and that also turns an autowalk.
 Memoryless textures must stay out of residency sets. Metal 4 does not retain buffers for in-flight work,
 so `Metal4Renderer` holds unloaded tiles until their frames finish.
 
 Debug builds use `-O` because tile meshing is too slow without it.
+
+## Trip planning
+
+"Plan a trip" searches places with MapKit (free, no key) and asks the Maply route service for a
+route preview (`maply-route-preview/1`, see `../atlas/ROUTING_API.md`). Every route is an
+unverified planning preview with navigation off. There is no live guidance and no route on the
+game map. Code is in `Sources/Trip/` (models, search, client, wording) and `Sources/App/Trip*.swift`.
+
+- Apple's terms (Developer Program License Agreement, Attachment 6) require search results to
+  appear with an Apple map, and Apple map data not to be stored, so the sheet shows a MapKit map
+  beside results and nothing is saved.
+- "My location" is the raw device fix, never the eased or joystick-moved character. It needs a
+  fix within 50 m and 30 s. While device location is enabled, an unavailable fix never silently
+  becomes a character start. Character starts are labelled simulated.
+- Debug builds call the local service at `http://127.0.0.1:8765`, which is started with
+  `cd ../atlas && uv run python -m atlas serve`. `PetalPath/Config/Debug-Info.plist` allows loopback
+  HTTP in Debug only. Release builds have no route service until one is approved.
+
+Trip hooks, as environment variables or `PP_NAME=value` launch arguments: `PP_ROUTE_API=<loopback url>|off`,
+`PP_ROUTE_SAMPLE=1` (labelled sample layout data), `PP_TRIP=1`, `PP_DEST=lat,lon[,name]`, `PP_TRIP_PLAN=1`.

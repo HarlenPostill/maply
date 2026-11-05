@@ -1,0 +1,195 @@
+{
+  "api_version": "maply-route-preview/1",
+  "release": {
+    "id": 1,
+    "published_at": "2026-11-04T11:47:49Z",
+    "schema_version": "maply-accessibility/1",
+    "fingerprint": "ffffffffffff"
+  },
+  "snapshot": {
+    "graph_version": "r1-caae371ea420",
+    "content_sha256": "bda4d084f9d1",
+    "designations_sha256": "fbcf06f2e51a",
+    "loaded_at": "2026-11-05T10:00:00Z",
+    "as_of_date": "2026-11-05",
+    "community_observations": 0
+  },
+  "area": {
+    "name": "Test Town (approximate)",
+    "approximate": true,
+    "enforcement": "strict",
+    "bbox": [
+      151.19935,
+      -33.90054,
+      151.203901,
+      -33.896762
+    ],
+    "geometry": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [
+              151.19934990995097,
+              -33.90053959221937
+            ],
+            [
+              151.20390054029417,
+              -33.90053959221937
+            ],
+            [
+              151.20390054029417,
+              -33.89676244668379
+            ],
+            [
+              151.19934990995097,
+              -33.89676244668379
+            ],
+            [
+              151.19934990995097,
+              -33.90053959221937
+            ]
+          ]
+        ]
+      ]
+    }
+  },
+  "survey": {
+    "imagery_from": "2019-06",
+    "imagery_to": "2024-03",
+    "imagery_median": "2024-03",
+    "observations": 126,
+    "undated_observations": 0,
+    "older_than_3y_observations": 2,
+    "flagged_uncertain_observations": 1
+  },
+  "graph": {
+    "street_m": 900.0,
+    "footpath_side_pieces": 18,
+    "footpath_side_m": 1800.0,
+    "footpath_side_evidence_m": {
+      "observed_m": 1785.0,
+      "uncertain_m": 15.0,
+      "unknown_m": 0.0
+    },
+    "excluded_footpath_side_m": {},
+    "excluded_crossings": {},
+    "eligible_footpath_side_m": 1800.0,
+    "corners": 24,
+    "crossings": 10,
+    "shared_surface_transitions": 2,
+    "connectors": 0,
+    "connector_m": 0,
+    "eligible_components": 3,
+    "largest_eligible_component_share": 0.7778,
+    "designation": {
+      "available": true,
+      "source": {
+        "source_file": "test",
+        "source_sha256": "000000000000",
+        "generated_at": "2026-11-05T00:00:00Z",
+        "content_sha256": "fbcf06f2e51a"
+      },
+      "matched_share": 1.0,
+      "ordinary_m": 800.0,
+      "designated_pedestrian_m": 100.0,
+      "designated_shared_m": 0.0,
+      "ambiguous_m": 0.0,
+      "basis_m": {
+        "per_way_match": 900.0
+      }
+    }
+  },
+  "policy": {
+    "version": "manual_chair_v1",
+    "all_routes": "unverified_preview",
+    "navigation_allowed": false,
+    "settled": {
+      "missing_footpath_ordinary_street": "excluded",
+      "fixed_barrier": "excluded_even_if_flagged",
+      "steps": "excluded_even_if_flagged",
+      "steps_reported_at_crossing": "every_crossing_at_that_junction_excluded",
+      "blocking_permanence_unknown": "eligible_with_prominent_warning",
+      "temporary_obstruction": "eligible_with_warning",
+      "flagged_observation": "uncertain; excludes only for fixed barriers and steps",
+      "missing_fact": "unknown",
+      "steep_slope": "eligible_with_prominent_warning",
+      "slope_cost": "none",
+      "imagery_age": "reported_separately",
+      "crossings_and_connectors": "always_unverified",
+      "designated_pedestrian_or_shared_street": "missing_footpath_allowed_when_per_way_designation_covers_piece"
+    },
+    "pending_decisions": [],
+    "parameters": {
+      "snap_max_m": 40.0,
+      "side_ambiguous_m": 0.5,
+      "excluded_bypass_m": 5.0,
+      "evidence_reach_m": 10.0,
+      "nearby_m": 25.0,
+      "display_offset_m": 4.0,
+      "imagery_age_years": 3,
+      "unknown_multiplier": 1.5,
+      "uncertain_multiplier": 1.3,
+      "connector_multiplier": 1.5,
+      "crossing_penalty_m": 30.0,
+      "shared_transition_penalty_m": 10.0,
+      "gap_weight": 3.0
+    }
+  },
+  "limits": [
+    {
+      "code": "preview_only",
+      "message": "No route is verified or fit to navigate by. It is a planning preview."
+    },
+    {
+      "code": "crossings_inferred_at_junctions",
+      "message": "Crossings are placed at street junctions from centreline geometry. Crossing locations, signals, kerb heights and crossing widths are not known."
+    },
+    {
+      "code": "camera_position_not_feature_position",
+      "message": "Observations are located at the Street View camera, not at the footpath, ramp or kerb they describe."
+    },
+    {
+      "code": "no_footway_network",
+      "message": "Only seven road classes are mapped: no park, plaza or laneway paths, service roads or steps."
+    },
+    {
+      "code": "no_grade_separation",
+      "message": "Bridges and tunnels are unknown; streets that cross on the map are treated as meeting."
+    },
+    {
+      "code": "width_not_measured",
+      "message": "Footpath width is not in the data."
+    },
+    {
+      "code": "slope_categorical_only",
+      "message": "Slopes are categories from imagery, on few observations. No gradients exist."
+    },
+    {
+      "code": "imagery_age",
+      "message": "Imagery ranges from 2007 to 2026 and much of it is undated."
+    },
+    {
+      "code": "approximate_boundary",
+      "message": "The survey boundary is approximate. Endpoints outside it are refused."
+    },
+    {
+      "code": "endpoint_gap_not_assessed",
+      "message": "The stretch between the requested point and the footpath is not assessed. Entrances are not in the data."
+    },
+    {
+      "code": "osm_tags_merged_by_name",
+      "message": "OSM sidewalk and width tags were merged per street name and are not used."
+    },
+    {
+      "code": "no_community_observations",
+      "message": "There are no player reports yet."
+    },
+    {
+      "code": "connectors_inferred",
+      "message": "Some links join streets that stop short of each other. They are inferred."
+    }
+  ],
+  "snap_max_m": 40.0,
+  "navigation_allowed": false
+}

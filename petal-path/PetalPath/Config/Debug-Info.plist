@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Debug builds only (project.yml). Lets the app reach the local route service over plain HTTP on
+     loopback, `cd atlas && uv run python -m atlas serve`. The app itself only accepts loopback URLs
+     (RouteServiceConfiguration.loopbackURL). Release builds carry no transport exception. -->
+<plist version="1.0">
+<dict>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

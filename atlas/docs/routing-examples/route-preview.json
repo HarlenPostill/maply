@@ -1,0 +1,407 @@
+{
+  "api_version": "maply-route-preview/1",
+  "status": "unverified_preview",
+  "navigation_allowed": false,
+  "release": {
+    "id": 1,
+    "published_at": "2026-11-04T11:47:49Z",
+    "schema_version": "maply-accessibility/1",
+    "fingerprint": "ffffffffffff"
+  },
+  "graph_version": "r1-caae371ea420",
+  "policy_version": "manual_chair_v1",
+  "as_of_date": "2026-11-05",
+  "endpoints": {
+    "origin": {
+      "requested": [
+        151.2014085,
+        -33.8998201
+      ],
+      "matched": [
+        151.2014085,
+        -33.899964
+      ],
+      "gap_m": 16.0,
+      "street_name": "Main Street",
+      "side": "left",
+      "facing": "north",
+      "side_ambiguous": false
+    },
+    "destination": {
+      "requested": [
+        151.202232,
+        -33.8994604
+      ],
+      "matched": [
+        151.2022103,
+        -33.8994604
+      ],
+      "gap_m": 2.0,
+      "street_name": "Side Street",
+      "side": "right",
+      "facing": "east",
+      "side_ambiguous": false
+    }
+  },
+  "summary": {
+    "route_m": 130.0,
+    "street_m": 130.0,
+    "connector_m": 0.0,
+    "endpoint_gap_m": 18.0,
+    "evidence_m": {
+      "observed_m": 115.0,
+      "uncertain_m": 15.0,
+      "unknown_m": 0.0
+    },
+    "designation_m": {
+      "ordinary_m": 130.0,
+      "designated_pedestrian_m": 0.0,
+      "designated_shared_m": 0.0,
+      "ambiguous_m": 0.0
+    },
+    "imagery_age_m": {
+      "within_3y_m": 100.0,
+      "older_than_3y_m": 30.0,
+      "undated_m": 0.0,
+      "no_observation_m": 0.0
+    },
+    "imagery_months": {
+      "from": "2019-06",
+      "to": "2024-03"
+    },
+    "crossings": {
+      "count": 1,
+      "shared_surface_transitions": 0
+    },
+    "connectors": {
+      "count": 0
+    },
+    "observations": {
+      "count": 9,
+      "flagged_uncertain": 1
+    }
+  },
+  "slope_observations": {
+    "unit": "feature_observations",
+    "footpath": {
+      "longitudinal": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 1
+      },
+      "cross": {
+        "apparently_level": 1,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      }
+    },
+    "driveway": {
+      "longitudinal": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      },
+      "cross": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      }
+    },
+    "kerb_ramp": {
+      "slope": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      },
+      "longitudinal": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      },
+      "cross": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      }
+    },
+    "crossing": {
+      "longitudinal": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      },
+      "cross": {
+        "apparently_level": 0,
+        "gentle": 0,
+        "moderate": 0,
+        "steep": 0
+      }
+    },
+    "observations_without_slope": 8
+  },
+  "width": {
+    "status": "not_measured"
+  },
+  "warnings": [
+    {
+      "code": "endpoint_gap_not_assessed",
+      "severity": "info",
+      "leg": 0,
+      "at": [
+        151.2014085,
+        -33.8998201
+      ],
+      "observed_on": null,
+      "message": "The 16 m between the origin and the footpath is not assessed."
+    },
+    {
+      "code": "steep_slope_observed",
+      "severity": "prominent",
+      "leg": 1,
+      "at": [
+        151.2016252,
+        -33.899991
+      ],
+      "observed_on": "2021-03",
+      "message": "A camera observation tagged a steep longitudinal on a footpath. The gradient was not measured."
+    },
+    {
+      "code": "crossing_unverified",
+      "severity": "prominent",
+      "leg": 2,
+      "at": [
+        151.202167,
+        -33.9
+      ],
+      "observed_on": null,
+      "message": "Crossing Side Street: the crossing point, kerb ramps and kerb heights are not known."
+    },
+    {
+      "code": "temporary_obstruction_observed",
+      "severity": "prominent",
+      "leg": 3,
+      "at": [
+        151.2021778,
+        -33.8998201
+      ],
+      "observed_on": "2024-03",
+      "message": "A temporary construction blocked the path when imaged."
+    },
+    {
+      "code": "flagged_observation",
+      "severity": "info",
+      "leg": 3,
+      "at": [
+        151.2021778,
+        -33.8996852
+      ],
+      "observed_on": "2024-03",
+      "message": "Observation flagged for re-checking; treat as uncertain."
+    },
+    {
+      "code": "endpoint_gap_not_assessed",
+      "severity": "info",
+      "leg": 4,
+      "at": [
+        151.202232,
+        -33.8994604
+      ],
+      "observed_on": null,
+      "message": "The 2 m between the destination and the footpath is not assessed."
+    }
+  ],
+  "warnings_truncated": false,
+  "legs": [
+    {
+      "index": 0,
+      "kind": "endpoint_gap",
+      "which": "origin",
+      "length_m": 16.0,
+      "evidence": "not_assessed",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            151.2014085,
+            -33.8998201
+          ],
+          [
+            151.2014085,
+            -33.899964
+          ]
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "kind": "footpath_side",
+      "street_name": "Main Street",
+      "side": "left",
+      "facing": "north",
+      "designation": "ordinary",
+      "designation_basis": "per_way_match",
+      "osm_way_ids": [
+        101
+      ],
+      "length_m": 70.0,
+      "evidence_m": {
+        "observed_m": 70.0,
+        "uncertain_m": 0.0,
+        "unknown_m": 0.0
+      },
+      "imagery_age_m": {
+        "within_3y_m": 40.0,
+        "older_than_3y_m": 30.0,
+        "undated_m": 0.0,
+        "no_observation_m": 0.0
+      },
+      "observations": 5,
+      "flagged_uncertain": 0,
+      "imagery_months": {
+        "from": "2019-06",
+        "to": "2024-03"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            151.2014085,
+            -33.899964
+          ],
+          [
+            151.202167,
+            -33.899964
+          ]
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "kind": "crossing",
+      "crossed_street": "Side Street",
+      "at": [
+        151.202167,
+        -33.9
+      ],
+      "length_m": null,
+      "evidence": "unverified",
+      "nearby_observations": {
+        "kerb_ramp_present": 1,
+        "kerb_ramp_absent": 0,
+        "kerb_ramp_raised_lip_or_step": 0,
+        "crossing_unmodified_kerb": 0,
+        "crossing_steps": 0,
+        "crossing_level_or_ramp": 0
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          151.202167,
+          -33.9
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "kind": "footpath_side",
+      "street_name": "Side Street",
+      "side": "right",
+      "facing": "east",
+      "designation": "ordinary",
+      "designation_basis": "per_way_match",
+      "osm_way_ids": [
+        103
+      ],
+      "length_m": 60.0,
+      "evidence_m": {
+        "observed_m": 45.0,
+        "uncertain_m": 15.0,
+        "unknown_m": 0.0
+      },
+      "imagery_age_m": {
+        "within_3y_m": 60.0,
+        "older_than_3y_m": 0.0,
+        "undated_m": 0.0,
+        "no_observation_m": 0.0
+      },
+      "observations": 4,
+      "flagged_uncertain": 1,
+      "imagery_months": {
+        "from": "2024-03",
+        "to": "2024-03"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            151.2022103,
+            -33.9
+          ],
+          [
+            151.2022103,
+            -33.8994604
+          ]
+        ]
+      }
+    },
+    {
+      "index": 4,
+      "kind": "endpoint_gap",
+      "which": "destination",
+      "length_m": 2.0,
+      "evidence": "not_assessed",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            151.202232,
+            -33.8994604
+          ],
+          [
+            151.2022103,
+            -33.8994604
+          ]
+        ]
+      }
+    }
+  ],
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [
+        151.2014085,
+        -33.899964
+      ],
+      [
+        151.202167,
+        -33.899964
+      ],
+      [
+        151.2022103,
+        -33.9
+      ],
+      [
+        151.2022103,
+        -33.8994604
+      ]
+    ]
+  },
+  "display_offset_m": 4.0,
+  "limits": [
+    "preview_only",
+    "crossings_inferred_at_junctions",
+    "camera_position_not_feature_position",
+    "width_not_measured",
+    "slope_categorical_only",
+    "imagery_age",
+    "endpoint_gap_not_assessed"
+  ]
+}

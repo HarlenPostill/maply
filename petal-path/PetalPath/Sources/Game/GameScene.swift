@@ -14,15 +14,26 @@ final class GameState: ObservableObject {
     /// Off is the fake location in Sydney, walked by joystick. On follows the device.
     @Published var useMyLocation = false { didSet { UserDefaults.standard.set(useMyLocation, forKey: Self.locationKey) } }
     @Published var locationBlocked = false
+    /// The joystick has walked away from the real position.
+    @Published var wandering = false
     @Published var backend = "…"
     @Published var fps = 0
     @Published var street: String?
     @Published var mapNotice: String?
     @Published var error: String?
+    /// Trip planning reads these. `deviceFix` is the raw device reading and is nil unless following the
+    /// device. The character is "simulated" whenever she is not standing on the real position.
+    @Published var deviceFix: LocationFix?
+    @Published var characterSimulated = true
+    var characterCoordinate = GeoCoordinate.circularQuay
 
     /// Joystick, screen space: x right, y up, length 0...1. Read every frame, so not published.
     var stick = SIMD2<Float>(0, 0)
     var cameraYaw: Float = 0, cameraPitch: Float = 0.95, cameraDistance: Float = 300
+    var returnToFix = false
+    /// Trip planning asks for a new device reading; a still device may otherwise send none.
+    var wantsFreshFix = false
+    static let lowestPitch: Float = 0.06
     var start = GeoCoordinate.circularQuay
 
     init() {
@@ -40,6 +51,7 @@ final class GameState: ObservableObject {
             start = GeoCoordinate(latitude: p[0], longitude: p[1])
         }
         if let y = env["PP_YAW"].flatMap(Float.init) { cameraYaw = y }
+        if let p = env["PP_PITCH"].flatMap(Float.init) { cameraPitch = p }
         if env["PP_FAST"] != nil { fastWalk = true }
         if env["PP_SETTINGS"] != nil { settingsOpen = true }
         #endif
@@ -59,6 +71,9 @@ struct FrameUniforms {
     var scroll: SIMD4<Float>       // xy pattern offset in metres, z time, w town height 0...1
     var world: SIMD4<Float>        // x curvature, y fog start, z fog end, w player scale
     var playerClip: SIMD4<Float>   // xy pixels, z depth, w x-ray radius in pixels
+    var skyRight: SIMD4<Float>     // camera ray at the screen's right, top and centre
+    var skyUp: SIMD4<Float>
+    var skyForward: SIMD4<Float>
 }
 
 /// Must match `DrawUniforms` in Shaders.metal.
@@ -91,7 +106,8 @@ final class GameScene {
     static let playerScale: Float = 30
     static let curvature: Float = 0.00030
     static let fogEnd: Float = 720
-    static let sky = SIMD3<Double>(0.930, 0.860, 0.760)
+    /// Linear colour of the sky at the horizon. `skyColour` in Shaders.metal must match, it is the fog.
+    static let sky = SIMD3<Double>(0.620, 0.800, 0.930)
 
     let asset: CharacterAsset
     let animator: Animator
@@ -201,13 +217,21 @@ final class GameScene {
             streetTimer = 0.4
             let g = Float(Mercator.groundScale(latitude: location.coordinate.latitude))
             let name = streamer.street(near: at, limit: 28, groundScale: g)
+            let wandering = gpsRunning && gps.isWandering
             let notice = gpsRunning && gps.status == .locating ? "Finding you…"
                 : gpsRunning && gps.status == .failed ? "Can't find your location yet…"
                 : streamer.failing && streamer.tiles.isEmpty ? "Can't reach the map. Retrying…"
                 : streamer.tiles.isEmpty ? "Loading the map…" : nil
+            let fix = gpsRunning ? gps.latestFix : nil
+            let simulated = !(gpsRunning && location === gps && !gps.isWandering)
+            let character = location.coordinate
             DispatchQueue.main.async { [state] in
                 if state.street != name { state.street = name }
                 if state.mapNotice != notice { state.mapNotice = notice }
+                if state.wandering != wandering { state.wandering = wandering }
+                if state.deviceFix != fix { state.deviceFix = fix }
+                if state.characterSimulated != simulated { state.characterSimulated = simulated }
+                state.characterCoordinate = character
             }
         }
         #if DEBUG
@@ -229,6 +253,8 @@ final class GameScene {
             } else if gps.hasFix, location !== gps {
                 location = gps
             }
+            if state.returnToFix { state.returnToFix = false; gps.returnToFix() }
+            if state.wantsFreshFix { state.wantsFreshFix = false; gps.requestFreshFix() }
         } else if gpsRunning {
             gps.stop(); gpsRunning = false
             joystick.teleport(to: state.start)
@@ -258,19 +284,29 @@ final class GameScene {
         if towardFront > .pi { towardFront -= 2 * .pi } else if towardFront < -.pi { towardFront += 2 * .pi }
         let yaw = state.cameraYaw + towardFront * f
         let pitch = state.cameraPitch + (0.16 - state.cameraPitch) * f
-        let distance = state.cameraDistance + (Self.playerScale * 3.2 - state.cameraDistance) * f
+
+        // As the camera drops towards the horizon it pulls in on a shorter arm, tilts up to the sky,
+        // and the world flattens so the view does not end a stone's throw away.
+        let low = 1 - simd_smoothstep(0.12, 0.6, pitch)
+        let arm = state.cameraDistance * (1 - 0.62 * low)
+        let distance = arm + (Self.playerScale * 3.2 - arm) * f
         let target = SIMD3<Float>(0, s * 0.42 - s * 0.62 * f, 0)
         let cp = cos(pitch), sp = sin(pitch)
         let eye = target + SIMD3(sin(yaw) * cp, sp, cos(yaw) * cp) * distance
-        let fovY: Float = 0.80
-        let viewProj = perspective(fovY: fovY, aspect: width / height, near: 2, far: 2200) * lookAt(eye, target, SIMD3(0, 1, 0))
+        let aim = target + SIMD3(0, low * (1 - f) * distance * 0.2, 0)
+        let curve = Self.curvature * (1 - 0.8 * low)
+        let fovY: Float = 0.80, aspect = width / height
+        let viewProj = perspective(fovY: fovY, aspect: aspect, near: 2, far: 2200) * lookAt(eye, aim, SIMD3(0, 1, 0))
+
+        let forward = simd_normalize(aim - eye), right = simd_normalize(simd_cross(forward, SIMD3(0, 1, 0)))
+        let up = simd_cross(right, forward), halfHeight = tan(fovY / 2)
 
         let model = makeTRS(.zero, simd_quatf(angle: facing, axis: SIMD3(0, 1, 0)), SIMD3(repeating: s))
 
         let m = Mercator.project(location.coordinate)
         let g = Mercator.groundScale(latitude: location.coordinate.latitude)
         let drift = pattern.offset(at: m, groundScale: g)
-        let horizon = Self.horizonDistance(eye: eye)
+        let horizon = Self.horizonDistance(eye: eye, curvature: curve)
         let fogEnd = min(Self.fogEnd, horizon * 0.92)
 
         let chest = viewProj * SIMD4<Float>(0, s * 0.5, 0, 1)
@@ -278,15 +314,17 @@ final class GameScene {
         let radius = 0.85 * s / simd_length(eye - SIMD3(0, s * 0.5, 0)) / tan(fovY / 2) * height / 2
         return FrameUniforms(viewProj: viewProj, playerModel: model, eye: SIMD4(eye, 1), sunDir: SIMD4(sunDirection, 0),
                              scroll: SIMD4(drift.x, drift.y, time, 1 - f),
-                             world: SIMD4(Self.curvature, fogEnd * 0.55, fogEnd, s),
-                             playerClip: SIMD4((ndc.x * 0.5 + 0.5) * width, (0.5 - ndc.y * 0.5) * height, ndc.z, radius))
+                             world: SIMD4(curve, fogEnd * 0.55, fogEnd, s),
+                             playerClip: SIMD4((ndc.x * 0.5 + 0.5) * width, (0.5 - ndc.y * 0.5) * height, ndc.z, radius),
+                             skyRight: SIMD4(right * halfHeight * aspect, 0), skyUp: SIMD4(up * halfHeight, 0),
+                             skyForward: SIMD4(forward, 0))
     }
 
     /// How far from the player the bent world drops out of sight, on the side facing away from the
     /// camera, where it comes soonest. The tangent point of a ray from the eye to y = -k d².
     /// A lower or closer camera brings this in, so the fog has to follow it.
-    static func horizonDistance(eye: SIMD3<Float>) -> Float {
-        let a = simd_length(SIMD2(eye.x, eye.z)), k = curvature
+    static func horizonDistance(eye: SIMD3<Float>, curvature k: Float = curvature) -> Float {
+        let a = simd_length(SIMD2(eye.x, eye.z))
         return -a + sqrt(a * a + max(eye.y, 0) / k)
     }
 

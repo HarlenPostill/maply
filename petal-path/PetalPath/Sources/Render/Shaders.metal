@@ -29,6 +29,9 @@ struct FrameUniforms {
     float4 scroll;            // xy pattern offset in metres, z time, w town height 0...1
     float4 world;             // x curvature, y fog start, z fog end, w player scale
     float4 playerClip;        // xy pixels, z depth, w x-ray radius in pixels
+    float4 skyRight;          // camera ray at the screen's right, top and centre
+    float4 skyUp;
+    float4 skyForward;
 };
 
 struct DrawUniforms {
@@ -39,7 +42,8 @@ struct DrawUniforms {
     float2 pad2;
 };
 
-constant float3 skyColour = float3(0.930, 0.860, 0.760);
+// Sky at the horizon, and the fog. GameScene.sky must match.
+constant float3 skyColour = float3(0.620, 0.800, 0.930);
 
 // The world rolls away from the player like a log, for a soft horizon instead of a hard edge.
 static float bend(float2 p, float y, constant FrameUniforms &frame) { return y - dot(p, p) * frame.world.x; }
@@ -58,6 +62,61 @@ static float hash21(float2 p) {
     p = fract(p * float2(123.34, 456.21));
     p += dot(p, p + 45.32);
     return fract(p.x * p.y);
+}
+
+// ---------------------------------------------------------------- sky
+struct SkyOut {
+    float4 position [[position]];
+    float2 ndc;
+};
+
+vertex SkyOut skyVertex(uint vid [[vertex_id]])
+{
+    float2 p = float2((vid << 1) & 2, vid & 2) * 2.0 - 1.0;
+    SkyOut o;
+    o.position = float4(p, 1.0, 1.0);
+    o.ndc = p;
+    return o;
+}
+
+static float noise2(float2 p) {
+    float2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash21(i), hash21(i + float2(1, 0)), f.x),
+               mix(hash21(i + float2(0, 1)), hash21(i + float2(1, 1)), f.x), f.y);
+}
+
+static float clouds(float2 p) {
+    float sum = 0.0, amp = 0.5;
+    for (int i = 0; i < 4; i++) {
+        sum += noise2(p) * amp;
+        p = p * 2.03 + float2(13.1, 7.7);
+        amp *= 0.5;
+    }
+    return sum;
+}
+
+// Painted clouds on a soft blue dome. Below the horizon is pure fog colour, and most of the screen
+// is there and covered by the map, so it returns before any noise is worked out.
+fragment float4 skyFragment(SkyOut in [[stage_in]],
+                            constant FrameUniforms &frame [[buffer(2)]])
+{
+    float3 d = normalize(frame.skyForward.xyz + frame.skyRight.xyz * in.ndc.x + frame.skyUp.xyz * in.ndc.y);
+    if (d.y <= 0.0) return float4(skyColour, 1.0);
+
+    float3 zenith = float3(0.170, 0.430, 0.800);
+    float3 c = mix(skyColour, zenith, pow(saturate(d.y * 1.5), 0.65));
+    float sun = saturate(dot(d, frame.sunDir.xyz));
+    c += float3(1.0, 0.86, 0.62) * (pow(sun, 900.0) * 1.2 + pow(sun, 40.0) * 0.12);
+
+    // Hard-edged puffs with a shaded underside, closer to a painted backdrop than to real weather.
+    float2 q = d.xz / (d.y + 0.30) * 2.3 + float2(frame.scroll.z * 0.012, frame.scroll.z * 0.004);
+    float density = clouds(q);
+    float shape = smoothstep(0.545, 0.565, density);
+    float lit = saturate((density - clouds(q + frame.sunDir.xz * 0.11)) * 7.0 + 0.62);
+    lit = floor(lit * 3.0 + 0.5) / 3.0;
+    float3 cloud = mix(float3(0.660, 0.730, 0.880), float3(1.0, 0.980, 0.945), lit);
+    return float4(mix(c, cloud, shape * smoothstep(0.012, 0.09, d.y)), 1.0);
 }
 
 // ---------------------------------------------------------------- character
@@ -254,13 +313,18 @@ fragment float4 propFragment(PropOut in [[stage_in]],
     if (frame.scroll.w < 0.04) discard_fragment();    // the town has sunk for the wardrobe
     if (pastHorizon(in.local, frame)) discard_fragment();
 
+    // A low camera sits among the buildings, so those right beside it dissolve too.
+    constexpr float bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+    uint2 px = uint2(in.position.xy) % 4;
+    float threshold = (bayer[px.y * 4 + px.x] + 0.5) / 16.0;
+    float nearEye = 1.0 - smoothstep(45.0, 120.0, distance(float3(in.local.x, in.height, in.local.y), frame.eye.xyz));
+    if (nearEye > threshold) discard_fragment();
+
     // Anything between the camera and the player melts away in a dither, so she is never lost.
     float2 fromPlayer = in.position.xy - frame.playerClip.xy;
     if (in.position.z < frame.playerClip.z) {
-        constexpr float bayer[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
-        uint2 px = uint2(in.position.xy) % 4;
         float hole = 1.0 - smoothstep(0.55, 1.0, length(fromPlayer * float2(1.3, 0.8)) / frame.playerClip.w);
-        if (hole * 0.92 > (bayer[px.y * 4 + px.x] + 0.5) / 16.0) discard_fragment();
+        if (hole * 0.92 > threshold) discard_fragment();
     }
 
     float3 n = normalize(in.normal);

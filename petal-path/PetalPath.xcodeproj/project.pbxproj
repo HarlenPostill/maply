@@ -7,30 +7,43 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		09FBB6A957B33233CFA04088 /* TripCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8C7ADB34F7C6237A6321A3 /* TripCopy.swift */; };
 		0B69AC140C668EB7B48C34FD /* MapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C06E435C962EB64F9A6BEBB /* MapTests.swift */; };
 		0E5407741F7247B4778603AD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B7D25B19B86869887B63D8A4 /* Assets.xcassets */; };
 		0EFF606B4608EC0B95A12A75 /* Animator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 267DD4AA628AC3AD0D757C9E /* Animator.swift */; };
+		12FD99495826D48C41E05845 /* PlaceSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A387F19BFCEF5972259F62 /* PlaceSearch.swift */; };
+		25D29DA98ACD71ED4DA4FF9D /* SampleRoutePlanningClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B8554E9FAC61016CAAE7981 /* SampleRoutePlanningClient.swift */; };
+		2B7E92D9504379C176E9D2BE /* RouteSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED94C39827BC294F0858ED88 /* RouteSummaryView.swift */; };
 		2EC33D3BB4A1F9AE43CFC600 /* Earcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACC266FA816D32DD74B85CD3 /* Earcut.swift */; };
 		410FFAD8FA24D5EAFFECC3C2 /* GameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8560B8057167223426E83ABC /* GameScene.swift */; };
 		4340CF0040463C58BF796F88 /* T_Shoes_Blue.png in Resources */ = {isa = PBXBuildFile; fileRef = 0CF0B8F7F33BB6D4A74F444A /* T_Shoes_Blue.png */; };
 		45EAD3DA75F41AE318FD4BD0 /* Wardrobe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CEEA5A9A184CAEB017C8A52 /* Wardrobe.swift */; };
 		493AC08E4200C9D0C66CB182 /* MapStreamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D543FD038C92AB742CDC18 /* MapStreamer.swift */; };
 		4DF950265EFA734870387559 /* T_Shoes_Olive.png in Resources */ = {isa = PBXBuildFile; fileRef = 0B412314720F9546FC3B4F33 /* T_Shoes_Olive.png */; };
+		511D01B0DD05AFC13A264593 /* TripTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3D4EBF227D691B2C66ACE8B /* TripTests.swift */; };
 		517538C8EB14B1D3E2A8D043 /* T_Top_Daisy.png in Resources */ = {isa = PBXBuildFile; fileRef = 03FFD1194C2FB3F76E8AB540 /* T_Top_Daisy.png */; };
+		5394E837A37247524F88BECC /* TripMaps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 236514C6330DEAE029811D6A /* TripMaps.swift */; };
 		5BAAC4526A51C95875B73AB1 /* TileSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60ED404A3CA6A42AE97D65CF /* TileSource.swift */; };
+		5DB7D75FB71A5015DEDACB88 /* TripPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10B79865B9AADB700E8FB95B /* TripPlanner.swift */; };
 		697A0C0E0E43810C3B30B373 /* LocationSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98C3779D2B457F33A80A0C3B /* LocationSource.swift */; };
 		6FCEA88D56CEFF5C4050A4B2 /* Metal4Renderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA7455D9EBC7A3190020BCAE /* Metal4Renderer.swift */; };
 		8722D15518768FD962A1F0D5 /* RenderStates.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF91827451765082C3044639 /* RenderStates.swift */; };
 		8B64B91432B2BE3BF35A55DB /* SimulatorRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01160256FD86D793BD563A3D /* SimulatorRenderer.swift */; };
 		8C76FD65350078F47A48A012 /* T_Shoes_Terracotta.png in Resources */ = {isa = PBXBuildFile; fileRef = F65C3DC340BB1B56AC362443 /* T_Shoes_Terracotta.png */; };
 		9660CE96E44705538947DF53 /* TileMesher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29C95183E216B2953983E0A3 /* TileMesher.swift */; };
+		967600AA5E3370386EDDBC94 /* TripSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F7E8BFDA4EC90F4FDC86F2 /* TripSheet.swift */; };
 		A1547040012349FAD9FFE49D /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 77458C523B64AB6BB58F87DF /* Shaders.metal */; };
+		A8AF19CC3E76C98DD213A817 /* RoutePlanningClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC8402F196266E76E5D4E6F /* RoutePlanningClient.swift */; };
 		A9D58659868CBC8B8FB8F83D /* GLB.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2C789874DCDBB2546A4A150 /* GLB.swift */; };
+		B3CA8B79C7BC2645274F9C7E /* RouteSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B626D54E9B7C0692DE9C8ED1 /* RouteSummary.swift */; };
+		B5E38CE72956DACD62A436B8 /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11F2865B6B4AF5C9EDD647B /* TripModels.swift */; };
 		B5EC284304DF8F245B201880 /* MVT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89373401117A2225C587D981 /* MVT.swift */; };
 		B67116D69B93F183DB2F57D6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D392FE1C0B11E2749BBB35FB /* SettingsView.swift */; };
+		B9D63872751FDA9D305506B9 /* RoutePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = 535AEAE11095A66432CFFCB7 /* RoutePlan.swift */; };
 		BB33F8B7B5076CA8D77E804A /* T_Shoes_Mustard.png in Resources */ = {isa = PBXBuildFile; fileRef = F3448F8692E21DE831F8718F /* T_Shoes_Mustard.png */; };
 		BBCA585A8A79E88A09D68491 /* player.glb in Resources */ = {isa = PBXBuildFile; fileRef = 6C801C70002F811BE171AC32 /* player.glb */; };
 		C28A94456E9CFE7557C10B80 /* Geo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBA1242395BB948908FC24B /* Geo.swift */; };
+		CC62E25D0CFEA8CD494CE7C5 /* RoutePreviewDecoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C647D567807A36B11E060F /* RoutePreviewDecoding.swift */; };
 		F988AD41091936296FF60051 /* PetalPathApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38F2FD176702816D34A1D857 /* PetalPathApp.swift */; };
 		FD630607B7615C6D00ED89D0 /* GameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 387AEE293A00081D1661B7FA /* GameView.swift */; };
 /* End PBXBuildFile section */
@@ -50,29 +63,42 @@
 		03FFD1194C2FB3F76E8AB540 /* T_Top_Daisy.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Top_Daisy.png; sourceTree = "<group>"; };
 		0B412314720F9546FC3B4F33 /* T_Shoes_Olive.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Olive.png; sourceTree = "<group>"; };
 		0CF0B8F7F33BB6D4A74F444A /* T_Shoes_Blue.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Blue.png; sourceTree = "<group>"; };
+		10B79865B9AADB700E8FB95B /* TripPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPlanner.swift; sourceTree = "<group>"; };
+		236514C6330DEAE029811D6A /* TripMaps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripMaps.swift; sourceTree = "<group>"; };
 		267DD4AA628AC3AD0D757C9E /* Animator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Animator.swift; sourceTree = "<group>"; };
 		29C95183E216B2953983E0A3 /* TileMesher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TileMesher.swift; sourceTree = "<group>"; };
 		387AEE293A00081D1661B7FA /* GameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameView.swift; sourceTree = "<group>"; };
 		38F2FD176702816D34A1D857 /* PetalPathApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PetalPathApp.swift; sourceTree = "<group>"; };
 		3C06E435C962EB64F9A6BEBB /* MapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapTests.swift; sourceTree = "<group>"; };
+		3D8C7ADB34F7C6237A6321A3 /* TripCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripCopy.swift; sourceTree = "<group>"; };
+		42C647D567807A36B11E060F /* RoutePreviewDecoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePreviewDecoding.swift; sourceTree = "<group>"; };
+		4FC8402F196266E76E5D4E6F /* RoutePlanningClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePlanningClient.swift; sourceTree = "<group>"; };
+		535AEAE11095A66432CFFCB7 /* RoutePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePlan.swift; sourceTree = "<group>"; };
 		60ED404A3CA6A42AE97D65CF /* TileSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TileSource.swift; sourceTree = "<group>"; };
+		66F7E8BFDA4EC90F4FDC86F2 /* TripSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripSheet.swift; sourceTree = "<group>"; };
 		6C801C70002F811BE171AC32 /* player.glb */ = {isa = PBXFileReference; path = player.glb; sourceTree = "<group>"; };
 		72381CC5E213517449FD91DA /* PetalPath.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PetalPath.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		77458C523B64AB6BB58F87DF /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		7B8554E9FAC61016CAAE7981 /* SampleRoutePlanningClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleRoutePlanningClient.swift; sourceTree = "<group>"; };
 		7CBA1242395BB948908FC24B /* Geo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Geo.swift; sourceTree = "<group>"; };
 		7CEEA5A9A184CAEB017C8A52 /* Wardrobe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Wardrobe.swift; sourceTree = "<group>"; };
 		8560B8057167223426E83ABC /* GameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameScene.swift; sourceTree = "<group>"; };
 		89373401117A2225C587D981 /* MVT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MVT.swift; sourceTree = "<group>"; };
 		98C3779D2B457F33A80A0C3B /* LocationSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationSource.swift; sourceTree = "<group>"; };
 		ACC266FA816D32DD74B85CD3 /* Earcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Earcut.swift; sourceTree = "<group>"; };
+		B3D4EBF227D691B2C66ACE8B /* TripTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripTests.swift; sourceTree = "<group>"; };
+		B626D54E9B7C0692DE9C8ED1 /* RouteSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteSummary.swift; sourceTree = "<group>"; };
 		B7D25B19B86869887B63D8A4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		BF91827451765082C3044639 /* RenderStates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderStates.swift; sourceTree = "<group>"; };
 		C6D543FD038C92AB742CDC18 /* MapStreamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapStreamer.swift; sourceTree = "<group>"; };
 		CA7455D9EBC7A3190020BCAE /* Metal4Renderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Metal4Renderer.swift; sourceTree = "<group>"; };
 		D392FE1C0B11E2749BBB35FB /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		ED94C39827BC294F0858ED88 /* RouteSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RouteSummaryView.swift; sourceTree = "<group>"; };
+		F11F2865B6B4AF5C9EDD647B /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
 		F2C789874DCDBB2546A4A150 /* GLB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GLB.swift; sourceTree = "<group>"; };
 		F3448F8692E21DE831F8718F /* T_Shoes_Mustard.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Mustard.png; sourceTree = "<group>"; };
 		F65C3DC340BB1B56AC362443 /* T_Shoes_Terracotta.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Terracotta.png; sourceTree = "<group>"; };
+		F9A387F19BFCEF5972259F62 /* PlaceSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSearch.swift; sourceTree = "<group>"; };
 		FC859EDBC68989CA71950CBB /* PetalPathTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PetalPathTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -84,6 +110,22 @@
 				98C3779D2B457F33A80A0C3B /* LocationSource.swift */,
 			);
 			path = Game;
+			sourceTree = "<group>";
+		};
+		247211568A01B862475B99FF /* Trip */ = {
+			isa = PBXGroup;
+			children = (
+				F9A387F19BFCEF5972259F62 /* PlaceSearch.swift */,
+				535AEAE11095A66432CFFCB7 /* RoutePlan.swift */,
+				4FC8402F196266E76E5D4E6F /* RoutePlanningClient.swift */,
+				42C647D567807A36B11E060F /* RoutePreviewDecoding.swift */,
+				B626D54E9B7C0692DE9C8ED1 /* RouteSummary.swift */,
+				7B8554E9FAC61016CAAE7981 /* SampleRoutePlanningClient.swift */,
+				3D8C7ADB34F7C6237A6321A3 /* TripCopy.swift */,
+				F11F2865B6B4AF5C9EDD647B /* TripModels.swift */,
+				10B79865B9AADB700E8FB95B /* TripPlanner.swift */,
+			);
+			path = Trip;
 			sourceTree = "<group>";
 		};
 		2FB4D83E62978706A3565AF7 /* PetalPath */ = {
@@ -116,6 +158,7 @@
 				03FD90994EF640F65667F9B5 /* Game */,
 				4E773CC80DF74F0A1946D75B /* Map */,
 				7BF3D00344F61ED6D88E5F8E /* Render */,
+				247211568A01B862475B99FF /* Trip */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -125,7 +168,10 @@
 			children = (
 				387AEE293A00081D1661B7FA /* GameView.swift */,
 				38F2FD176702816D34A1D857 /* PetalPathApp.swift */,
+				ED94C39827BC294F0858ED88 /* RouteSummaryView.swift */,
 				D392FE1C0B11E2749BBB35FB /* SettingsView.swift */,
+				236514C6330DEAE029811D6A /* TripMaps.swift */,
+				66F7E8BFDA4EC90F4FDC86F2 /* TripSheet.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -177,6 +223,7 @@
 			isa = PBXGroup;
 			children = (
 				3C06E435C962EB64F9A6BEBB /* MapTests.swift */,
+				B3D4EBF227D691B2C66ACE8B /* TripTests.swift */,
 			);
 			path = PetalPathTests;
 			sourceTree = "<group>";
@@ -302,12 +349,24 @@
 				493AC08E4200C9D0C66CB182 /* MapStreamer.swift in Sources */,
 				6FCEA88D56CEFF5C4050A4B2 /* Metal4Renderer.swift in Sources */,
 				F988AD41091936296FF60051 /* PetalPathApp.swift in Sources */,
+				12FD99495826D48C41E05845 /* PlaceSearch.swift in Sources */,
 				8722D15518768FD962A1F0D5 /* RenderStates.swift in Sources */,
+				B9D63872751FDA9D305506B9 /* RoutePlan.swift in Sources */,
+				A8AF19CC3E76C98DD213A817 /* RoutePlanningClient.swift in Sources */,
+				CC62E25D0CFEA8CD494CE7C5 /* RoutePreviewDecoding.swift in Sources */,
+				B3CA8B79C7BC2645274F9C7E /* RouteSummary.swift in Sources */,
+				2B7E92D9504379C176E9D2BE /* RouteSummaryView.swift in Sources */,
+				25D29DA98ACD71ED4DA4FF9D /* SampleRoutePlanningClient.swift in Sources */,
 				B67116D69B93F183DB2F57D6 /* SettingsView.swift in Sources */,
 				A1547040012349FAD9FFE49D /* Shaders.metal in Sources */,
 				8B64B91432B2BE3BF35A55DB /* SimulatorRenderer.swift in Sources */,
 				9660CE96E44705538947DF53 /* TileMesher.swift in Sources */,
 				5BAAC4526A51C95875B73AB1 /* TileSource.swift in Sources */,
+				09FBB6A957B33233CFA04088 /* TripCopy.swift in Sources */,
+				5394E837A37247524F88BECC /* TripMaps.swift in Sources */,
+				B5E38CE72956DACD62A436B8 /* TripModels.swift in Sources */,
+				5DB7D75FB71A5015DEDACB88 /* TripPlanner.swift in Sources */,
+				967600AA5E3370386EDDBC94 /* TripSheet.swift in Sources */,
 				45EAD3DA75F41AE318FD4BD0 /* Wardrobe.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -317,6 +376,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0B69AC140C668EB7B48C34FD /* MapTests.swift in Sources */,
+				511D01B0DD05AFC13A264593 /* TripTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -351,6 +411,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = "PetalPath/Config/Debug-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -428,7 +489,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Petal Path";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Petal Path puts your character on the map where you are.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Petal Path puts your character on the map where you are, and can plan a trip preview from there.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait;
@@ -502,7 +563,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Petal Path";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Petal Path puts your character on the map where you are.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Petal Path puts your character on the map where you are, and can plan a trip preview from there.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait;

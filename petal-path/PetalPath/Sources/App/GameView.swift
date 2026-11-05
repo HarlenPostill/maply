@@ -8,6 +8,8 @@ let olive = Color(red: 0.42, green: 0.42, blue: 0.22)
 /// The map, with the HUD laid over it.
 struct GameView: View {
     @StateObject private var state = GameState()
+    @StateObject private var trip = TripPlanner.live()
+    @State private var tripDetent = PresentationDetent.large
     @State private var dragStart: (yaw: Float, pitch: Float)?
     @State private var zoomStart: Float?
 
@@ -18,7 +20,7 @@ struct GameView: View {
                 .gesture(DragGesture().onChanged { g in
                     let s = dragStart ?? (state.cameraYaw, state.cameraPitch); dragStart = s
                     state.cameraYaw = s.yaw - Float(g.translation.width) * 0.007
-                    state.cameraPitch = min(1.25, max(0.5, s.pitch + Float(g.translation.height) * 0.003))
+                    state.cameraPitch = min(1.25, max(GameState.lowestPitch, s.pitch + Float(g.translation.height) * 0.003))
                 }.onEnded { _ in dragStart = nil })
                 .simultaneousGesture(MagnifyGesture().onChanged { g in
                     let s = zoomStart ?? state.cameraDistance; zoomStart = s
@@ -33,6 +35,8 @@ struct GameView: View {
                             Pill(text: street, weight: .bold).accessibilityIdentifier("street")
                         }
                         Pill(text: "\(state.backend) · \(state.fps) fps", weight: .medium).opacity(0.8)
+                        HUDButton(title: TripCopy.title, icon: "magnifyingglass") { trip.open(with: state.tripLocation) }
+                            .accessibilityIdentifier("planTrip")
                     }
                     Spacer()
                     Button { state.settingsOpen = true } label: {
@@ -45,19 +49,19 @@ struct GameView: View {
                 Spacer()
                 if let notice = state.mapNotice ?? state.error { Pill(text: notice, weight: .semibold).padding(.bottom, 12) }
                 HStack(alignment: .bottom) {
-                    if !state.useMyLocation { Joystick(state: state) }
+                    Joystick(state: state)
                     Spacer()
-                    Button {
-                        state.stick = .zero
-                        state.useMyLocation.toggle()
-                    } label: {
-                        Label(state.useMyLocation ? "Back to Sydney" : "Use my location",
-                              systemImage: state.useMyLocation ? "building.2.fill" : "location.fill")
-                            .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 11)
-                            .foregroundStyle(ink).background(cream.opacity(0.92), in: Capsule())
+                    VStack(alignment: .trailing, spacing: 8) {
+                        if state.useMyLocation && state.wandering {
+                            HUDButton(title: "Back to me", icon: "scope") { state.returnToFix = true }
+                                .accessibilityIdentifier("backToMe")
+                        }
+                        HUDButton(title: state.useMyLocation ? "Back to Sydney" : "Use my location",
+                                  icon: state.useMyLocation ? "building.2.fill" : "location.fill") {
+                            state.useMyLocation.toggle()
+                        }
+                        .accessibilityIdentifier("locationMode")
                     }
-                    .accessibilityIdentifier("locationMode")
                 }
                 .padding(.horizontal, 20).padding(.bottom, 6)
                 Link(destination: MapAttribution.copyright) {
@@ -67,8 +71,8 @@ struct GameView: View {
                 }
                 .accessibilityIdentifier("attribution")
             }
-            .opacity(state.settingsOpen ? 0 : 1)
-            .animation(.easeOut(duration: 0.2), value: state.settingsOpen)
+            .opacity(state.settingsOpen || trip.isOpen ? 0 : 1)
+            .animation(.easeOut(duration: 0.2), value: state.settingsOpen || trip.isOpen)
         }
         .alert("Location is off", isPresented: $state.locationBlocked) {
             Button("Open Settings") {
@@ -84,6 +88,30 @@ struct GameView: View {
                 .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.56)))
                 .presentationBackground(cream)
                 .presentationCornerRadius(26)
+        }
+        .sheet(isPresented: $trip.isOpen, onDismiss: { trip.close() }) {
+            TripSheet(planner: trip, state: state)
+                .presentationDetents([.medium, .large], selection: $tripDetent)
+                .presentationBackground(cream)
+                .presentationCornerRadius(26)
+        }
+        #if DEBUG
+        .task {
+            try? await Task.sleep(for: .seconds(1))     // let the scene publish a position first
+            trip.applyLaunchHooks(state.tripLocation)
+        }
+        #endif
+    }
+}
+
+struct HUDButton: View {
+    let title: String; let icon: String; let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .padding(.horizontal, 14).padding(.vertical, 11)
+                .foregroundStyle(ink).background(cream.opacity(0.92), in: Capsule())
         }
     }
 }

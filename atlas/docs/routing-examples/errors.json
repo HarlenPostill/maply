@@ -1,0 +1,77 @@
+{
+  "outside_coverage": {
+    "api_version": "maply-route-preview/1",
+    "error": {
+      "code": "outside_coverage",
+      "message": "The destination is outside the surveyed area.",
+      "details": {
+        "which": "destination"
+      }
+    }
+  },
+  "too_far_from_network": {
+    "api_version": "maply-route-preview/1",
+    "error": {
+      "code": "too_far_from_network",
+      "message": "No surveyed street within 40 m of the origin.",
+      "details": {
+        "which": "origin",
+        "max_m": 40.0
+      }
+    }
+  },
+  "no_route_disconnected": {
+    "api_version": "maply-route-preview/1",
+    "error": {
+      "code": "no_route",
+      "message": "The origin and destination are not connected in the graph.",
+      "details": {
+        "reason": "disconnected",
+        "origin_in_main_network": false,
+        "destination_in_main_network": true
+      }
+    }
+  },
+  "same_location": {
+    "api_version": "maply-route-preview/1",
+    "error": {
+      "code": "same_location",
+      "message": "The origin and destination are the same place.",
+      "details": {
+        "distance_m": 1.0
+      }
+    }
+  },
+  "snapshot_changed": {
+    "api_version": "maply-route-preview/1",
+    "error": {
+      "code": "snapshot_changed",
+      "message": "The atlas changed since the client last read it.",
+      "details": {
+        "graph_version": "r1-caae371ea420"
+      }
+    }
+  },
+  "invalid_request": {
+    "api_version": "maply-route-preview/1",
+    "error": {
+      "code": "invalid_request",
+      "message": "The request body is not a valid route preview request.",
+      "details": {
+        "fields": [
+          "destination"
+        ]
+      }
+    }
+  },
+  "data_unavailable": {
+    "api_version": "maply-route-preview/1",
+    "error": {
+      "code": "data_unavailable",
+      "message": "The atlas snapshot is not available yet.",
+      "details": {
+        "reason": "loading"
+      }
+    }
+  }
+}

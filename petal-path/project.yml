@@ -11,7 +11,7 @@ settings:
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_UILaunchScreen_Generation: YES
     INFOPLIST_KEY_CFBundleDisplayName: Petal Path
-    INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Petal Path puts your character on the map where you are.
+    INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: Petal Path puts your character on the map where you are, and can plan a trip preview from there.
     INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
     INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait
     TARGETED_DEVICE_FAMILY: "1,2"
@@ -29,6 +29,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.harlenpostill.PetalPath
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          INFOPLIST_FILE: PetalPath/Config/Debug-Info.plist   # loopback HTTP to the local route service
     sources:
       - path: PetalPath/Sources
       - path: PetalPath/Resources

@@ -6,6 +6,7 @@ import MetalKit
 final class Metal4Renderer: NSObject, MTKViewDelegate {
     private static let framesInFlight = 3
     private static let drawStride = 256
+    private static let frameBlock = 512          // FrameUniforms lives before the per-draw data
     private static let frameBufferSize = 256 * 1024
     private let device: MTLDevice
     private let scene: GameScene
@@ -14,7 +15,7 @@ final class Metal4Renderer: NSObject, MTKViewDelegate {
     private var allocators: [any MTL4CommandAllocator] = []
     private let table: any MTL4ArgumentTable
     private let characterPSO: MTLRenderPipelineState, groundPSO: MTLRenderPipelineState
-    private let shadowPSO: MTLRenderPipelineState, propPSO: MTLRenderPipelineState
+    private let shadowPSO: MTLRenderPipelineState, propPSO: MTLRenderPipelineState, skyPSO: MTLRenderPipelineState
     private let paintState: MTLDepthStencilState, shadowState: MTLDepthStencilState, solidState: MTLDepthStencilState
     private let sampler: MTLSamplerState
     private let residency: any MTLResidencySet
@@ -65,6 +66,7 @@ final class Metal4Renderer: NSObject, MTKViewDelegate {
         groundPSO = try pso("groundVertex", "groundFragment")
         shadowPSO = try pso("groundVertex", "groundFragment", blended: true)
         propPSO = try pso("propVertex", "propFragment")
+        skyPSO = try pso("skyVertex", "skyFragment")
 
         let states = RenderStates(device: device)
         paintState = states.paint; shadowState = states.shadow; solidState = states.solid
@@ -163,7 +165,12 @@ final class Metal4Renderer: NSObject, MTKViewDelegate {
         table.setAddress(fb.gpuAddress, index: 2)
         table.setSamplerState(sampler.gpuResourceID, index: 0)
 
-        var offset = Self.drawStride
+        e.setCullMode(.none)
+        e.setDepthStencilState(paintState)
+        e.setRenderPipelineState(skyPSO)
+        e.drawPrimitives(primitiveType: .triangle, vertexStart: 0, vertexCount: 3)
+
+        var offset = Self.frameBlock
         func writeUniforms(_ du: DrawUniforms) {
             var u = du
             memcpy(fb.contents() + offset, &u, MemoryLayout<DrawUniforms>.stride)

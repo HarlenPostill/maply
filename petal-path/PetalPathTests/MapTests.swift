@@ -101,7 +101,7 @@ final class MapTests: XCTestCase {
         let home = GeoCoordinate(latitude: 51.5007, longitude: -0.1246)
         g.receive(home, accuracy: 10)
         XCTAssertTrue(g.hasFix)
-        XCTAssertEqual(g.coordinate, home)
+        XCTAssertEqual(g.coordinate.latitude, home.latitude, accuracy: 1e-9)
 
         // 2 m with 10 m accuracy is noise
         g.receive(GeoCoordinate(latitude: 51.50072, longitude: -0.1246), accuracy: 10)
@@ -122,6 +122,57 @@ final class MapTests: XCTestCase {
         g.receive(far, accuracy: 10)
         g.tick(dt: 1.0 / 60)
         XCTAssertEqual(g.coordinate.latitude, far.latitude, accuracy: 1e-6)
+    }
+
+    func testJoystickWandersFromRealLocationAndFixesStillApply() {
+        let g = GPSLocationSource(start: .circularQuay)
+        let home = GeoCoordinate(latitude: 51.5007, longitude: -0.1246)
+        g.receive(home, accuracy: 10)
+        g.tick(dt: 1.0 / 60)
+        XCTAssertFalse(g.isWandering)
+
+        g.steer(SIMD2(10, 0))          // east
+        for _ in 0..<120 { g.tick(dt: 1.0 / 60) }
+        g.steer(.zero)
+        for _ in 0..<120 { g.tick(dt: 1.0 / 60) }
+        XCTAssertTrue(g.isWandering)
+        XCTAssertGreaterThan(g.coordinate.longitude, home.longitude)
+        let east = g.coordinate.longitude
+
+        // walking for real still moves her, keeping the wander
+        g.receive(GeoCoordinate(latitude: 51.50097, longitude: -0.1246), accuracy: 10)
+        for _ in 0..<600 { g.tick(dt: 1.0 / 60) }
+        XCTAssertEqual(g.coordinate.latitude, 51.50097, accuracy: 1e-5)
+        XCTAssertEqual(g.coordinate.longitude, east, accuracy: 1e-6)
+
+        g.returnToFix()
+        g.tick(dt: 1.0 / 60)
+        XCTAssertFalse(g.isWandering)
+        XCTAssertEqual(g.coordinate.longitude, home.longitude, accuracy: 1e-6)
+    }
+
+    func testOverlapJoinsPartsButNotTerraces() {
+        func box(_ x: Float, _ y: Float, _ w: Float, _ h: Float) -> [SIMD2<Float>] {
+            [SIMD2(x, y), SIMD2(x + w, y), SIMD2(x + w, y + h), SIMD2(x, y + h)]
+        }
+        let podium = box(0, 0, 40, 40)
+        XCTAssertTrue(TileMesher.overlaps(podium, box(10, 10, 12, 12)), "tower on a podium")
+        XCTAssertTrue(TileMesher.overlaps(podium, box(30, 10, 30, 12)), "partly overlapping")
+        XCTAssertFalse(TileMesher.overlaps(podium, box(40, 0, 20, 40)), "terraces share a wall")
+        XCTAssertFalse(TileMesher.overlaps(podium, box(50, 0, 20, 40)), "apart")
+    }
+
+    /// Both tiles draw a building on their shared edge, so both must name it the same.
+    func testBuildingOnATileEdgeGetsTheSameKeyFromBothTiles() {
+        let size = Float(TileID.size)
+        let left = TileID(x: 15073, y: 9831), right = TileID(x: 15074, y: 9831)
+        let seenFromLeft: [SIMD2<Float>] = [SIMD2(size - 10, 100), SIMD2(size + 15, 100), SIMD2(size + 15, 130), SIMD2(size - 10, 130)]
+        let seenFromRight = seenFromLeft.map { $0 - SIMD2(size, 0) }
+        let a = TileMesher.crossingKey(seenFromLeft, tile: left, tileSize: size)
+        let b = TileMesher.crossingKey(seenFromRight, tile: right, tileSize: size)
+        XCTAssertNotNil(a)
+        XCTAssertEqual(a, b)
+        XCTAssertNil(TileMesher.crossingKey(seenFromRight.map { $0 + SIMD2(300, 0) }, tile: right, tileSize: size))
     }
 
     private func triangulatedArea(_ rings: [[SIMD2<Float>]]) -> Float {

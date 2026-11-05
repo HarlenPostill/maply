@@ -19,7 +19,7 @@ Current dataset (City of Sydney, release 1):
 | Observations | 52,483: footpath present 48,933, absent 3,545, undetermined 5 |
 | Features | 49,648 footpath sections, 2,283 hazards, 2,122 driveways, 552 kerb ramps, 58 crossings |
 | Footpath sides | 7,924 good, 777 fair, 731 poor, 366 no footpath, 952 unknown |
-| Routing graph | 7,754 nodes, 9,434 edges; 92.8% of edges in one connected network |
+| Routing graph | 7,754 nodes, 9,434 edges; 92.8% of nodes in one connected network |
 
 The database is about 76 MB.
 
@@ -164,7 +164,18 @@ VALUES (:observation_id, 'footpath_section', '{"presence": "present", "surface":
 SELECT atlas.refresh_derived();
 ```
 
+## Route preview API
+
+`uv run python -m atlas serve` runs a local, read-only HTTP API for unverified wheelchair route
+previews (destination planning only, never navigation). Its contract, policy and limits are in
+[`ROUTING_API.md`](ROUTING_API.md).
+
 ## Known limits
+
+- The route-preview API derives its own side-aware graph from the underlying facts. It does
+  not use the legacy grades or costs below: missing attributes distort the signal averages,
+  and choosing the better side does not establish a continuous footpath. See
+  [ROUTING_API.md](ROUTING_API.md) for the implemented policy and deployment proposal.
 
 - Crossings are not modelled as edges yet. Routes may switch between footpath
   sides wherever two streets meet, and connectors carry no kerb-ramp data.
