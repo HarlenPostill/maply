@@ -6,6 +6,7 @@ verify        Compare the production database with a fresh tagger extract.
 status        Print the production database summary.
 serve         Run the read-only route preview API (see ROUTING_API.md).
 designations  Copy per-way OSM street classes from the tagger street file (read-only) into var/.
+api-role      Create or update the read-only login for the public API (see api/provision.sh).
 """
 from __future__ import annotations
 
@@ -57,6 +58,10 @@ def main(argv=None) -> int:
     p = sub.add_parser('designations')
     p.add_argument('--street-file', type=Path, default=STREET_FILE)
     p.add_argument('--output', type=Path, default=DESIGNATIONS_FILE)
+    p = sub.add_parser('api-role')
+    p.add_argument('--role', default='atlas_api')
+    p.add_argument('--password-file', type=Path, required=True, help='private file holding the password (never printed)')
+    p.add_argument('--check-only', action='store_true', help='only log in as the role and check it')
     args = parser.parse_args(argv)
 
     if args.command == 'designations':
@@ -74,6 +79,19 @@ def main(argv=None) -> int:
         serve(database_service(target_url(), args.designations), args.host, args.port, args.refresh_s)
         return 0
 
+    if args.command == 'api-role':
+        from atlas.routing.production import credential_problems, provision_role, role_url
+        password = args.password_file.read_text().strip()
+        if not args.check_only:
+            with connect_target() as conn:
+                provision_role(conn, args.role, password)
+        owner = target_url()
+        tls = {} if 'sslmode=' in owner or '127.0.0.1' in owner or 'localhost' in owner else {'sslmode': 'require'}
+        with psycopg.connect(role_url(owner, args.role, password), connect_timeout=15,
+                             application_name='maply-atlas-api-role', **tls) as conn:
+            problems = credential_problems(conn)
+        print(json.dumps({'role': args.role, 'provisioned': not args.check_only, 'safe': not problems, 'problems': problems}))
+        return 1 if problems else 0
     if args.command == 'publish' and args.dry_run:
         print(json.dumps(read_dataset().stats(), indent=2))
         return 0

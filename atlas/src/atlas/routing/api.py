@@ -12,6 +12,7 @@ import math
 import threading
 import time
 import uuid
+import weakref
 
 import anyio
 from fastapi import FastAPI, Request
@@ -20,12 +21,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from atlas.routing.limits import RateLimit, RateLimiter
 from atlas.routing.policy import API_VERSION
 from atlas.routing.router import Cancelled, RouteError, coverage
 from atlas.routing.service import Service
 
 log = logging.getLogger('atlas.api')
 MAX_BODY = 4096
+BODY_TIMEOUT_S = 10.0
 
 
 class LatLng(BaseModel):
@@ -80,16 +83,31 @@ class RequestLog:
         try:
             await self.app(scope, receive, send_with_headers)
         finally:
-            log.info('%s %s %s %d %s %dms', rid, scope.get('method'), scope.get('path'), seen['status'], seen['code'],
+            path = scope.get('path')
+            endpoint = path if path in ('/v1/health', '/v1/coverage', '/v1/route-preview') else 'unknown_endpoint'
+            method = scope.get('method')
+            method = method if method in ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS') else 'OTHER'
+            log.info('%s %s %s %d %s %dms', rid, method, endpoint, seen['status'], seen['code'],
                      (time.monotonic() - started) * 1000)
 
 
-def create_app(service: Service, max_concurrency: int = 4) -> FastAPI:
-    app = FastAPI(title='Maply route preview', version=API_VERSION, docs_url=None, redoc_url=None)
+def rate_limited(retry_after: int) -> JSONResponse:
+    return error(429, 'rate_limited', 'Too many requests. Try again shortly.', retry_after=retry_after)
+
+
+def create_app(service: Service, max_concurrency: int = 4, limiter: RateLimiter | None = None,
+               body_timeout_s: float = BODY_TIMEOUT_S) -> FastAPI:
+    app = FastAPI(title='Maply route preview', version=API_VERSION, docs_url=None, redoc_url=None,
+                  openapi_url=None)
     slots = threading.BoundedSemaphore(max_concurrency)
     app.state.route_slots = slots
+    app.state.limiter = limiter
 
+    # Starlette runs the last added middleware first: the log line also covers limited requests.
+    if limiter is not None:
+        app.add_middleware(RateLimit, limiter=limiter, reject=rate_limited)
     app.add_middleware(RequestLog)
+    coverage_cache: dict = {}
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):
@@ -122,7 +140,14 @@ def create_app(service: Service, max_concurrency: int = 4) -> FastAPI:
         state = service.state
         if state.graph is None:
             return unavailable()
-        return coverage(state.graph)
+        # Fixed for a given graph, and it walks every observation: build it once per graph.
+        # A weak reference, so a replaced graph is not kept alive by this cache.
+        graph = state.graph
+        cached = coverage_cache.get('graph')
+        if cached is None or cached() is not graph:
+            coverage_cache['body'] = await anyio.to_thread.run_sync(lambda: coverage(graph))
+            coverage_cache['graph'] = weakref.ref(graph)
+        return coverage_cache['body']
 
     @app.post('/v1/route-preview')
     async def route_preview(request: Request):
@@ -136,10 +161,15 @@ def create_app(service: Service, max_concurrency: int = 4) -> FastAPI:
         if declared and declared.isdigit() and int(declared) > MAX_BODY:
             return error(413, 'payload_too_large', 'The request body is too large.', {'max_bytes': MAX_BODY})
         body = b''
-        async for chunk in request.stream():
-            body += chunk
-            if len(body) > MAX_BODY:
-                return error(413, 'payload_too_large', 'The request body is too large.', {'max_bytes': MAX_BODY})
+        try:
+            with anyio.fail_after(body_timeout_s):
+                async for chunk in request.stream():
+                    body += chunk
+                    if len(body) > MAX_BODY:
+                        return error(413, 'payload_too_large', 'The request body is too large.', {'max_bytes': MAX_BODY})
+        except TimeoutError:
+            return error(408, 'request_timeout', 'The request body was not received in time.',
+                         {'timeout_s': body_timeout_s})
         try:
             req = RoutePreviewRequest.model_validate(json.loads(body))
         except (ValueError, ValidationError) as exc:

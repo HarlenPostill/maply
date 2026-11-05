@@ -550,11 +550,92 @@ final class MaplyRouteServiceTests: XCTestCase {
     }
 
     func testDebugBuildsUseTheLocalServiceUnlessTurnedOff() async {
-        let local = RouteServiceConfiguration.makeClient(environment: [:])
+        let local = RouteServiceConfiguration.makeClient(environment: [:], deployed: nil, build: .init(debug: true, runsOnThisMac: true))
         XCTAssertTrue(local is MaplyRouteService)
         if let s = local as? MaplyRouteService { let base = await s.baseURL; XCTAssertEqual(base.absoluteString, "http://127.0.0.1:8765") }
-        XCTAssertTrue(RouteServiceConfiguration.makeClient(environment: ["PP_ROUTE_API": "off"]) is NotConnectedRoutePlanningClient)
-        XCTAssertTrue(RouteServiceConfiguration.makeClient(environment: ["PP_ROUTE_API": "https://example.com"]) is NotConnectedRoutePlanningClient)
+        XCTAssertTrue(RouteServiceConfiguration.makeClient(environment: ["PP_ROUTE_API": "off"], deployed: nil, build: .init(debug: true, runsOnThisMac: true)) is NotConnectedRoutePlanningClient)
+    }
+
+    private let railway = URL(string: "https://atlas-api.up.railway.app")!
+    private typealias C = RouteServiceConfiguration
+
+    func testEveryBuildPicksItsEndpoint() {
+        let mac = C.Build(debug: true, runsOnThisMac: true), phone = C.Build(debug: true, runsOnThisMac: false)
+        let release = C.Build(debug: false, runsOnThisMac: false), releaseMac = C.Build(debug: false, runsOnThisMac: true)
+        let loop = URL(string: "http://127.0.0.1:8765")!
+        // Simulator and Mac keep the local service by default, even when a deployed URL exists.
+        XCTAssertEqual(C.endpoint(environment: [:], deployed: railway, build: mac), .local(loop))
+        // A debug build on a phone uses the deployed service: 127.0.0.1 there is the phone itself.
+        XCTAssertEqual(C.endpoint(environment: [:], deployed: railway, build: phone), .deployed(railway))
+        XCTAssertEqual(C.endpoint(environment: [:], deployed: nil, build: phone), .none(.noDeployedURL))
+        // Release uses only the deployed service and ignores every debug override.
+        XCTAssertEqual(C.endpoint(environment: [:], deployed: railway, build: release), .deployed(railway))
+        XCTAssertEqual(C.endpoint(environment: [:], deployed: railway, build: releaseMac), .deployed(railway))
+        XCTAssertEqual(C.endpoint(environment: [:], deployed: nil, build: release), .none(.noDeployedURL))
+        XCTAssertEqual(C.endpoint(environment: ["PP_ROUTE_API": "http://127.0.0.1:8765", "PP_ROUTE_SAMPLE": "1"], deployed: railway, build: release), .deployed(railway))
+    }
+
+    func testExplicitOverridesAreHonouredOrRefusedNeverSwapped() {
+        let mac = C.Build(debug: true, runsOnThisMac: true), phone = C.Build(debug: true, runsOnThisMac: false)
+        XCTAssertEqual(C.endpoint(environment: ["PP_ROUTE_API": "http://localhost:9000"], deployed: railway, build: phone), .local(URL(string: "http://localhost:9000")!))
+        XCTAssertEqual(C.endpoint(environment: ["PP_ROUTE_API": "https://staging.example.org"], deployed: railway, build: mac), .deployed(URL(string: "https://staging.example.org")!))
+        XCTAssertEqual(C.endpoint(environment: ["PP_ROUTE_API": "off"], deployed: railway, build: phone), .none(.turnedOff))
+        for bad in ["http://atlas-api.up.railway.app", "http://192.168.1.20:8765", "ftp://x.example.org", "railway", "https://"] {
+            XCTAssertEqual(C.endpoint(environment: ["PP_ROUTE_API": bad], deployed: railway, build: mac), .none(.invalidOverride), bad)
+        }
+        XCTAssertEqual(C.endpoint(environment: ["PP_ROUTE_SAMPLE": "1"], deployed: railway, build: phone), .sample)
+    }
+
+    func testOnlyAPlainHTTPSBaseURLCountsAsDeployed() {
+        XCTAssertEqual(C.deployedURL("https://atlas-api.up.railway.app"), railway)
+        XCTAssertEqual(C.deployedURL(" https://Atlas-API.up.railway.app/ \n"), railway, "trimmed, lower-cased, trailing slash dropped")
+        XCTAssertEqual(C.deployedURL("https://atlas.example.org:8443")?.absoluteString, "https://atlas.example.org:8443")
+        for bad: String? in [nil, "", "$(MAPLY_ROUTE_API_URL)", "http://atlas-api.up.railway.app", "https://localhost", "https://127.0.0.1",
+                             "https://user:pw@atlas.example.org", "https://atlas.example.org/v1", "https://atlas.example.org/?key=1",
+                             "https://atlas.example.org/#x", "https://intranet", "atlas-api.up.railway.app"] {
+            XCTAssertNil(C.deployedURL(bad), bad ?? "nil")
+        }
+    }
+
+    func testTheDeployedURLKeyIsInTheBuiltInfoPlist() {
+        // Present in this (Debug) build's plist, from MAPLY_ROUTE_API_URL. Empty until deployment.
+        XCTAssertNotNil(Bundle.main.object(forInfoDictionaryKey: C.infoKey) as? String)
+    }
+
+    func testRateLimitingAndGatewayPagesUseExistingStates() {
+        XCTAssertEqual(RoutePreviewDecoding.failure(status: 429, data: Data("Too Many Requests".utf8)), .planning(.busy))
+        let envelope = #"{"api_version":"maply-route-preview/1","error":{"code":"rate_limited","message":"x"}}"#
+        XCTAssertEqual(RoutePreviewDecoding.failure(status: 429, data: Data(envelope.utf8)), .planning(.busy))
+        for gateway in [502, 503, 504] {
+            XCTAssertEqual(RoutePreviewDecoding.failure(status: gateway, data: Data("<html>Application failed to respond</html>".utf8)), .planning(.unavailable))
+        }
+        XCTAssertEqual(RoutePreviewDecoding.failure(status: 500, data: Data()), .planning(.serviceError))
+        XCTAssertTrue(TripCopy.canRetry(.busy))
+    }
+
+    func testRequestsWaitLongEnoughForTheHostToWakeButNotForever() async throws {
+        XCTAssertEqual(MaplyRouteService.requestTimeout, 120)
+        let t = ScriptedTransport([{ (try example("coverage.json"), 200) }, { (try example("route-preview.json"), 200) }])
+        let s = MaplyRouteService(baseURL: railway, transport: t)
+        _ = try await s.coverage()
+        _ = try await s.plan(RoutePlanRequest(origin: TripEndpoint(coordinate: quay, label: "A", source: .searchedPlace),
+                                              destination: TripEndpoint(coordinate: townHall, label: "B", source: .searchedPlace)))
+        XCTAssertEqual(t.sent.map(\.timeoutInterval), [120, 120], "both coverage and route requests")
+        XCTAssertEqual(t.sent.count, 2, "one request each: no retry loop")
+    }
+
+    func testATimedOutRequestIsUnavailableNotRetried() async {
+        let t = ScriptedTransport([{ throw URLError(.timedOut) }])
+        do { _ = try await MaplyRouteService(baseURL: railway, transport: t).coverage(); XCTFail() }
+        catch { XCTAssertEqual(error as? RoutePlanningError, .unavailable) }
+        XCTAssertEqual(t.sent.count, 1)
+    }
+
+    func testARateLimitedCoverageRequestFailsSoTheCoreLimitsStillShow() async {
+        let t = ScriptedTransport([{ (Data("slow down".utf8), 429) }])
+        do { _ = try await MaplyRouteService(baseURL: railway, transport: t).coverage(); XCTFail() }
+        catch { XCTAssertEqual(error as? RoutePlanningError, .busy) }
+        XCTAssertEqual(t.sent.first?.url?.absoluteString, "https://atlas-api.up.railway.app/v1/coverage")
     }
 }
 

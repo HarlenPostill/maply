@@ -1,0 +1,20 @@
+# Railway service `atlas-api`. Deployed from the staged directory (api/stage.sh), never
+# from the repository, so nothing outside the allowlist is uploaded.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Ready only once a snapshot is loaded. The sleeping free-plan database can take ~30 s to
+# wake, and the first full snapshot read follows.
+healthcheckPath = "/v1/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+numReplicas = 1
+drainingSeconds = 15
+# The free plan has $1 of credit a month; an always-on ~300 MB service would use it in about
+# ten days, and the database would stop with it. Sleeping after 10 idle minutes costs a cold
+# start instead: the database wakes and a full snapshot is read before the first answer
+# (expect 30-90 s). Set false on a paid plan for instant answers.
+sleepApplication = true

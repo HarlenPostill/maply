@@ -76,8 +76,11 @@ enum RoutePreviewDecoding {
             var originInMainNetwork: Bool?; var destinationInMainNetwork: Bool?
             var excludedReasons: [String]?
         }
+        // Rate limited, by the service or by the host in front of it: an existing state, "busy".
+        if status == 429 { return .planning(.busy) }
         guard let e = try? decoder.decode(Envelope.self, from: data).error else {
-            return .planning(status == 503 ? .unavailable : .serviceError)
+            // No contract body: a gateway or host page, not the service itself.
+            return .planning([502, 503, 504].contains(status) ? .unavailable : .serviceError)
         }
         let which: EndpointEnd? = e.details?.which == "origin" ? .origin : e.details?.which == "destination" ? .destination : nil
         switch e.code {

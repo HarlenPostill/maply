@@ -118,7 +118,7 @@ image with `railway up ./database --path-as-root --service atlas-db`.
 
 Other Railway services in the project should connect over the private network
 with `${{atlas-db.DATABASE_URL}}`. Use `DATABASE_PUBLIC_URL` (TLS) only from outside Railway.
-Read-only app roles can be granted `atlas_read`.
+Read-only app roles can be granted `atlas_read`; `atlas_api` (the route preview API) is one.
 
 ## Example queries
 
@@ -169,6 +169,29 @@ SELECT atlas.refresh_derived();
 `uv run python -m atlas serve` runs a local, read-only HTTP API for unverified wheelchair route
 previews (destination planning only, never navigation). Its contract, policy and limits are in
 [`ROUTING_API.md`](ROUTING_API.md).
+
+### Route preview API on Railway
+
+`api/` deploys the same API as the public service `atlas-api` in `maply-atlas`, next to `atlas-db`
+(which it never changes). It reads the atlas with the read-only login `atlas_api` over the private
+network, and Railway serves it over HTTPS on a `*.up.railway.app` domain.
+
+```bash
+api/provision.sh            # first deploy and every redeploy; safe to re-run
+api/provision.sh --rotate   # new API password, then redeploy
+api/check.sh https://<domain>
+```
+
+`provision.sh` keeps the API password in `atlas/.secrets/atlas_api_password` (private,
+gitignored, never printed). It creates or updates the role through the owner URL in `atlas/.env`,
+creates the service in `eu-west` (the database's region), sets `ATLAS_API_DATABASE_URL` through
+stdin, adds a domain, uploads only what `api/stage.sh` stages, waits for readiness and runs
+`check.sh`. To check the login only: `uv run python -m atlas api-role --password-file
+.secrets/atlas_api_password --check-only`.
+
+On the free plan the service sleeps after 10 idle minutes (`sleepApplication` in
+`api/railway.toml`). The first request after that wakes the database and reads a full snapshot,
+which can take 30–90 s. Limits and safeguards are in [ROUTING_API.md](ROUTING_API.md#public-deployment-atlasapi).
 
 ## Known limits
 

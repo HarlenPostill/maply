@@ -102,9 +102,36 @@ game map. Code is in `Sources/Trip/` (models, search, client, wording) and `Sour
 - "My location" is the raw device fix, never the eased or joystick-moved character. It needs a
   fix within 50 m and 30 s. While device location is enabled, an unavailable fix never silently
   becomes a character start. Character starts are labelled simulated.
-- Debug builds call the local service at `http://127.0.0.1:8765`, which is started with
-  `cd ../atlas && uv run python -m atlas serve`. `PetalPath/Config/Debug-Info.plist` allows loopback
-  HTTP in Debug only. Release builds have no route service until one is approved.
+- Where routes come from (`RouteServiceConfiguration.endpoint`):
+  - Release builds use only the deployed HTTPS service and ignore every debug hook.
+  - Debug builds on a phone use the deployed service, because 127.0.0.1 there is the phone itself.
+  - Debug builds in the Simulator or on Mac use the local service at `http://127.0.0.1:8765`, started with
+    `cd ../atlas && uv run python -m atlas serve`.
+  - `PP_ROUTE_API` overrides this in Debug: a loopback `http://` URL, an `https://` URL, or `off`. Anything else is
+    refused, and route planning says it isn't connected, never quietly using another service.
+- The deployed URL is the `MAPLY_ROUTE_API_URL` build setting in `project.yml`, currently
+  `https://atlas-api-production-662d.up.railway.app` (Railway, `maply-atlas` / `atlas-api`). It's written into
+  Info.plist as `MaplyRouteAPIURL`. It must be a plain `https://host` base URL with no path, credentials or query.
+  Empty means "not connected". It's a public address, not a secret: the app carries no keys or database details.
+- `PetalPath/Config/Debug-Info.plist` allows loopback HTTP in Debug only. `PetalPath/Config/Info.plist` (Release)
+  has no transport exception.
+- Each request to the service waits up to 120 s (`MaplyRouteService.requestTimeout`), once, with no retry loop. The
+  free-plan host sleeps when idle and takes about 30–90 s to wake. Planning shows its progress state the whole
+  time, and changing the start or the destination cancels the request.
+- A 429, or a gateway page with no API body (502, 503, 504), shows the existing "busy" or "can't reach the service"
+  message with Try again. A request that times out shows "can't reach the service" with Try again.
 
-Trip hooks, as environment variables or `PP_NAME=value` launch arguments: `PP_ROUTE_API=<loopback url>|off`,
+Trip hooks in Debug, as environment variables or `PP_NAME=value` launch arguments: `PP_ROUTE_API=<url>|off`,
 `PP_ROUTE_SAMPLE=1` (labelled sample layout data), `PP_TRIP=1`, `PP_DEST=lat,lon[,name]`, `PP_TRIP_PLAN=1`.
+
+### On an iPhone
+
+Signing is automatic with team `Z43R7TX7Z9`. Build for the connected phone, then install. The deployed URL comes
+from `project.yml`; add `MAPLY_ROUTE_API_URL=https://<host>` to the build command to point one build elsewhere.
+
+    xcodebuild build -project PetalPath.xcodeproj -scheme PetalPath -configuration Debug \
+      -destination 'id=<device UDID>' -derivedDataPath build/trip-device -allowProvisioningUpdates
+    xcrun devicectl device install app --device <device UDID> build/trip-device/Build/Products/Debug-iphoneos/PetalPath.app
+
+The first launch needs the developer certificate trusted on the phone (Settings › General › VPN & Device Management).
+A real iPhone runs the Metal 4 renderer, which until then had only been tested through Mac Catalyst.

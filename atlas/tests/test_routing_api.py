@@ -129,3 +129,11 @@ def test_logs_hold_no_coordinates(client, caplog):
     for value in (origin['lat'], origin['lng']):
         assert f'{value:.4f}'[:7] not in text
     assert '151.2' not in text and '-33.9' not in text
+
+
+def test_unknown_paths_never_enter_application_logs(client, caplog):
+    caplog.set_level(logging.INFO, logger='atlas.api')
+    assert client.get('/unknown/-33.8731,151.2069%0Aprivacy-probe').status_code == 404
+    lines = [r.getMessage() for r in caplog.records if r.name == 'atlas.api']
+    assert any('unknown_endpoint' in line for line in lines)
+    assert all('-33.8731' not in line and 'privacy-probe' not in line and '\n' not in line for line in lines)

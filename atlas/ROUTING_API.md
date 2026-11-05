@@ -178,8 +178,10 @@ tag, and none says `steep`.
 | 422 | `same_location` | `{"distance_m"}` (under 5 m apart) |
 | 404 | `no_route` | `{"reason": "disconnected" \| "blocked_by_exclusions", "origin_in_main_network", "destination_in_main_network"}` |
 | 409 | `snapshot_changed` | `{"graph_version"}` |
+| 408 | `request_timeout` | `{"timeout_s": 10.0}` (the body did not arrive in time) |
+| 429 | `rate_limited` | `Retry-After` in seconds. Public deployment only (see below). |
 | 503 | `busy` | `Retry-After: 2` (4 concurrent searches) |
-| 503 | `data_unavailable` | `{"reason": "loading" \| "database_unreachable" \| "integrity_failed"}`, `Retry-After: 30` |
+| 503 | `data_unavailable` | `{"reason": "loading" \| "database_unreachable" \| "integrity_failed" \| "misconfigured"}`, `Retry-After: 30` |
 | 504 | `route_timeout` | `{"timeout_s": 3.0}` |
 | 404 / 405 | `not_found` / `method_not_allowed` | |
 | 500 | `internal_error` | |
@@ -217,7 +219,7 @@ If the client disconnects, the search is cancelled and the server answers 499 to
   preferred. 30 m-equivalent per crossing, 10 m per shared-surface transition, connectors ×1.5.
   Slope and imagery age never change cost.
 - **Limits.** 4 concurrent searches, a 3 s compute budget, cancellation on disconnect, 4 KB
-  bodies.
+  bodies that must arrive within 10 s. The public deployment adds rate limits (below).
 
 ## Policy `manual_chair_v1`
 
@@ -305,16 +307,48 @@ class agree. In production every sample matched at least one way:
   They mistake "observed, no concern" for "not observed" when a tag is missing. A fix to the
   database views is still a proposal: no migration has been written.
 
-## Deployment proposal (needs user approval, nothing deployed)
+## Public deployment (`atlas/api/`)
 
-1. Create a login role with only `atlas_read` (for example `atlas_api`) instead of the superuser
-   `atlas`. This is a production change.
-2. Add a Railway service `atlas-api` in `maply-atlas`, built from `atlas/`:
-   - It runs `python -m atlas serve --host 0.0.0.0 --port $PORT`.
-   - `ATLAS_DATABASE_URL` is `${{atlas-db.DATABASE_URL}}`, with the `atlas_api` credentials, over
-     the private network.
-   - The designations file is baked into the image.
-   - Railway terminates HTTPS. Add rate limiting and an app key before any public exposure.
-3. The free plan sleeps services, so expect 30 s cold starts. A paid plan also lifts the 128 MB WAL
-   cap. The volume is 303.8 of 500 MB used.
-4. Until approved, it runs locally only.
+The Railway service `atlas-api` in `maply-atlas` runs `python -m atlas.routing.production`. It
+differs from `serve` only in configuration and limits:
+
+- **Database login.** It reads `ATLAS_API_DATABASE_URL` from the environment only, never
+  `atlas/.env` or `ATLAS_DATABASE_URL` (the owner). The login is `atlas_api`: a member of
+  `atlas_read`, with no direct grants, `default_transaction_read_only = on`, a 120 s statement
+  timeout, a 60 s idle-in-transaction timeout and a connection limit of 5, all stored on the role.
+  It connects to `atlas-db` over Railway's private network with TLS. Before reading any data, each
+  load checks the login's catalog facts: not `atlas`, `postgres`, `maply` or `tagger`; no superuser,
+  role, database, replication or RLS-bypass rights; no create or owner rights on the database or any
+  schema; no write, truncate, trigger, reference or maintain right on any atlas relation; no
+  privileged built-in role; and the read-only default stored on the role. A failed check answers
+  `503 data_unavailable` with reason `misconfigured`, and at startup it stops the process (exit 78).
+- **Rate limits**, in memory, answered with `429 rate_limited` and `Retry-After` before the body is
+  read:
+
+  | Endpoint class | Per client | Whole service |
+  | --- | --- | --- |
+  | `POST /v1/route-preview` | burst 10, then 1 every 3 s | burst 30, then 4 a second |
+  | `GET` (health, coverage) | burst 30, then 1 a second | burst 100, then 30 a second |
+
+  This device-testing deployment shares the per-client budget across all clients. It does
+  not trust proxy headers; neither rotating headers nor proxy peers changes that bucket.
+  Per-client IP isolation can be enabled only after edge overwrite behaviour is verified.
+  The independent global caps always apply. `api/check.sh` uses a bounded concurrent burst
+  to check the shared limit; it makes no claim about header rewriting.
+- **Server.** uvicorn with no access log, no proxy-header rewriting, no `Server` header, at most 64
+  connections, and keep-alive longer than the edge's 60 s idle timeout. No OpenAPI or docs routes.
+  The coverage body is built once per graph.
+- **Readiness.** The first snapshot is loaded before the port opens, so the Railway health check
+  (`/v1/health`, 300 s) passes only on a ready service. If the database stays unreachable, the
+  service starts anyway, answers 503 and keeps retrying. It refreshes every 30 minutes
+  (`ATLAS_API_REFRESH_S`).
+- **Image.** `api/stage.sh` assembles the upload from an allowlist: the Dockerfile, `railway.toml`,
+  `pyproject.toml`, `uv.lock`, `src/atlas/**/*.py`, `var/osm_way_designations.json` and a NOTICE with
+  the OpenStreetMap (ODbL) attribution. It refuses anything else, including dotfiles, secrets,
+  connection strings with passwords, and a designations file with unexpected fields. The image runs
+  as a non-root user and holds only locked runtime dependencies.
+
+Measured locally with the full release (52,483 observations): ready 6 s after start, about 270 MB
+resident, about 400 MB at peak while a new snapshot is swapped in. The free plan allows 512 MB.
+
+Deploy and redeploy: `atlas/api/provision.sh` (see the [README](README.md#route-preview-api-on-railway)).

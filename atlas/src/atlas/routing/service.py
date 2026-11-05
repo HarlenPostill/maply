@@ -53,7 +53,7 @@ class Service:
         except SnapshotError as exc:
             log.error('snapshot rejected: %s', exc.reason)
             with self._lock:
-                if self.state.graph is None or exc.reason == 'integrity_failed':
+                if self.state.graph is None or exc.reason in ('integrity_failed', 'misconfigured'):
                     self.state = State(error=exc.reason)
             return
         self._rebuild(snapshot)

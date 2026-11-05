@@ -32,11 +32,17 @@ actor MaplyRouteService: RoutePlanningClient {
     private let transport: HTTPTransport
     private var graphVersion: String?
 
+    /// One bounded wait per request, with no retry loop. The deployed service's free-plan host sleeps
+    /// when idle and takes about 30–90 s to wake, so a shorter limit would fail exactly when it is
+    /// starting up. Planning shows its progress state throughout, and changing the start or the
+    /// destination cancels the request.
+    static let requestTimeout: TimeInterval = 120
+
     init(baseURL: URL, transport: HTTPTransport) { self.baseURL = baseURL; self.transport = transport }
 
     func coverage() async throws -> RouteCoverage? {
         var r = URLRequest(url: baseURL.appending(path: "v1/coverage"))
-        r.timeoutInterval = 20
+        r.timeoutInterval = Self.requestTimeout
         let (data, status) = try await send(r)
         guard status == 200 else { throw Self.planningError(status: status, data: data) }
         let c = try RoutePreviewDecoding.coverage(data)
@@ -51,7 +57,7 @@ actor MaplyRouteService: RoutePlanningClient {
     private func plan(_ request: RoutePlanRequest, retry: Bool) async throws -> RoutePlan {
         var r = URLRequest(url: baseURL.appending(path: "v1/route-preview"))
         r.httpMethod = "POST"
-        r.timeoutInterval = 20
+        r.timeoutInterval = Self.requestTimeout
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.httpBody = try RoutePreviewDecoding.requestBody(request, expectedGraphVersion: graphVersion)
         let (data, status) = try await send(r)
@@ -99,31 +105,87 @@ actor MaplyRouteService: RoutePlanningClient {
 enum RouteServiceConfiguration {
     /// The local route service from `cd atlas && uv run python -m atlas serve`.
     static let localDefault = "http://127.0.0.1:8765"
+    /// Info.plist key holding the deployed service's HTTPS base URL. Its value comes from the
+    /// `MAPLY_ROUTE_API_URL` build setting. It is an address, never a secret: the app carries no
+    /// keys, passwords or database details.
+    static let infoKey = "MaplyRouteAPIURL"
 
-    /// Picks the client for this run. Release builds have no route service until one is approved
-    /// and published. Debug builds use the local service on loopback (`PP_ROUTE_API` to change it,
-    /// `PP_ROUTE_API=off` for none), or sample layout data with `PP_ROUTE_SAMPLE=1`.
-    static func makeClient(environment: [String: String] = debugEnvironment) -> RoutePlanningClient {
-        #if DEBUG
-        if environment["PP_ROUTE_SAMPLE"] != nil { return SampleRoutePlanningClient() }
-        if let url = loopbackURL(environment["PP_ROUTE_API"] ?? localDefault) {
-            return MaplyRouteService(baseURL: url, transport: URLSession.shared)
+    /// Where this run gets routes from.
+    enum Endpoint: Equatable {
+        case sample
+        case local(URL)
+        case deployed(URL)
+        case none(Reason)
+        enum Reason: Equatable { case turnedOff, invalidOverride, noDeployedURL }
+    }
+
+    /// The build this is. Only debug builds read overrides, and only simulator and Mac runs default
+    /// to the local service, because on a phone 127.0.0.1 is the phone itself.
+    struct Build: Equatable {
+        var debug: Bool
+        var runsOnThisMac: Bool
+
+        static var current: Build {
+            #if DEBUG
+            let debug = true
+            #else
+            let debug = false
+            #endif
+            #if targetEnvironment(simulator) || targetEnvironment(macCatalyst)
+            return Build(debug: debug, runsOnThisMac: true)
+            #else
+            return Build(debug: debug, runsOnThisMac: false)
+            #endif
         }
-        #endif
-        return NotConnectedRoutePlanningClient()
+    }
+
+    /// Release builds: the deployed HTTPS service, and nothing else. Debug builds: `PP_ROUTE_SAMPLE=1`
+    /// for labelled sample data; `PP_ROUTE_API` for an explicit service (loopback HTTP or any valid
+    /// HTTPS URL; `off` for none; anything else is refused, never quietly replaced); otherwise the
+    /// local service on the simulator or Mac, and the deployed service on a phone.
+    static func endpoint(environment: [String: String], deployed: URL?, build: Build) -> Endpoint {
+        guard build.debug else { return deployed.map(Endpoint.deployed) ?? .none(.noDeployedURL) }
+        if environment["PP_ROUTE_SAMPLE"] != nil { return .sample }
+        if let override = environment["PP_ROUTE_API"]?.trimmingCharacters(in: .whitespaces), !override.isEmpty {
+            if override == "off" { return .none(.turnedOff) }
+            if let url = loopbackURL(override) { return .local(url) }
+            if let url = deployedURL(override) { return .deployed(url) }
+            return .none(.invalidOverride)
+        }
+        if build.runsOnThisMac, let url = loopbackURL(localDefault) { return .local(url) }
+        return deployed.map(Endpoint.deployed) ?? .none(.noDeployedURL)
+    }
+
+    static func makeClient(environment: [String: String] = debugEnvironment,
+                           deployed: URL? = deployedURL(Bundle.main.object(forInfoDictionaryKey: infoKey) as? String),
+                           build: Build = .current) -> RoutePlanningClient {
+        switch endpoint(environment: environment, deployed: deployed, build: build) {
+        case .sample:
+            #if DEBUG
+            return SampleRoutePlanningClient()
+            #else
+            return NotConnectedRoutePlanningClient()
+            #endif
+        case .local(let url), .deployed(let url):
+            return MaplyRouteService(baseURL: url, transport: URLSession.shared)
+        case .none:
+            return NotConnectedRoutePlanningClient()
+        }
     }
 
     /// Debug settings from the environment, or from `PP_NAME=value` launch arguments for tools that can
-    /// only pass arguments, such as the simulator driver.
+    /// only pass arguments, such as the simulator driver. Release builds read none.
     static var debugEnvironment: [String: String] {
-        var e = ProcessInfo.processInfo.environment
         #if DEBUG
+        var e = ProcessInfo.processInfo.environment
         for a in ProcessInfo.processInfo.arguments where a.hasPrefix("PP_") {
             let kv = a.split(separator: "=", maxSplits: 1)
             e[String(kv[0])] = kv.count > 1 ? String(kv[1]) : "1"
         }
-        #endif
         return e
+        #else
+        return [:]
+        #endif
     }
 
     /// Only plain-HTTP loopback addresses are accepted for local testing.
@@ -131,5 +193,18 @@ enum RouteServiceConfiguration {
         guard let string, let url = URL(string: string), url.scheme == "http",
               let host = url.host(), ["127.0.0.1", "localhost", "::1"].contains(host) else { return nil }
         return url
+    }
+
+    /// A deployed service: HTTPS, a real host name, no credentials, query or fragment, and no
+    /// path beyond "/". The app appends "v1/…" itself.
+    static func deployedURL(_ string: String?) -> URL? {
+        guard let raw = string?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty, !raw.contains("$("),
+              let c = URLComponents(string: raw), c.scheme?.lowercased() == "https",
+              let host = c.host?.lowercased(), host.contains("."), !host.hasSuffix("."),
+              !["127.0.0.1", "localhost", "::1", "0.0.0.0"].contains(host),
+              c.user == nil, c.password == nil, c.query == nil, c.fragment == nil,
+              c.path.isEmpty || c.path == "/" else { return nil }
+        var clean = URLComponents(); clean.scheme = "https"; clean.host = host; clean.port = c.port
+        return clean.url
     }
 }

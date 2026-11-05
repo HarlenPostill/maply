@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Debug builds only (project.yml). Lets the app reach the local route service over plain HTTP on
-     loopback, `cd atlas && uv run python -m atlas serve`. The app itself only accepts loopback URLs
+<!-- Debug builds only (project.yml). MaplyRouteAPIURL is the deployed route service's HTTPS base URL,
+     from the MAPLY_ROUTE_API_URL build setting; a debug build on a phone uses it. The transport
+     exception lets the simulator and Mac reach the local route service over plain HTTP on loopback,
+     `cd atlas && uv run python -m atlas serve`. The app itself only accepts loopback URLs for plain HTTP
      (RouteServiceConfiguration.loopbackURL). Release builds carry no transport exception. -->
 <plist version="1.0">
 <dict>
+	<key>MaplyRouteAPIURL</key>
+	<string>$(MAPLY_ROUTE_API_URL)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

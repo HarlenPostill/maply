@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Release builds (project.yml). Xcode merges this with the generated Info.plist.
+     MaplyRouteAPIURL is the deployed route service's HTTPS base URL, from the MAPLY_ROUTE_API_URL
+     build setting. It is an address, not a secret. Empty means route planning says "not connected".
+     No transport exceptions: the deployed service is HTTPS only. -->
+<plist version="1.0">
+<dict>
+	<key>MaplyRouteAPIURL</key>
+	<string>$(MAPLY_ROUTE_API_URL)</string>
+</dict>
+</plist>

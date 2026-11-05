@@ -12,6 +12,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from typing import Callable
 
 import psycopg
 
@@ -21,7 +22,7 @@ log = logging.getLogger('atlas.routing')
 
 
 class SnapshotError(Exception):
-    """The atlas could not be read (reason: database_unreachable or integrity_failed)."""
+    """The atlas could not be read (reason: database_unreachable, integrity_failed or misconfigured)."""
 
     def __init__(self, reason: str, message: str):
         super().__init__(message)
@@ -235,12 +236,19 @@ def _check_graph(edges, nodes, segments):
             raise SnapshotError('integrity_failed', f'Routing edge {e.id} references a missing node or segment.')
 
 
-def load_with_retry(url: str, attempts: int = 4, first_delay_s: float = 3.0) -> Snapshot:
-    """The free-plan database sleeps; the first connection after a pause is often dropped."""
+def load_with_retry(url: str, attempts: int = 4, first_delay_s: float = 3.0,
+                    check: Callable[[psycopg.Connection], None] | None = None) -> Snapshot:
+    """The free-plan database sleeps; the first connection after a pause is often dropped.
+
+    `check` runs on the connection before anything is read; it raises SnapshotError to refuse.
+    """
     delay = first_delay_s
     for attempt in range(1, attempts + 1):
         try:
             with connect_readonly(url) as conn:
+                if check is not None:
+                    check(conn)
+                    conn.rollback()   # the snapshot opens its own transaction
                 return load_snapshot(conn)
         except SnapshotError:
             raise
