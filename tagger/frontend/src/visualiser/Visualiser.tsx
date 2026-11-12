@@ -18,6 +18,7 @@ const Observation3D = lazy(() => import('./Observation3D'));
 const VIEWS: { key: View; label: string; hint: string }[] = [
   { key: 'overview', label: 'Overview', hint: 'At-a-glance composition of the dataset' },
   { key: 'map', label: 'Map', hint: 'Every photo, segment or grid cell coloured by any attribute' },
+  { key: 'heatmap', label: 'Heatmap', hint: 'Photo density or the share of a selected observation in each grid cell' },
   { key: '3d', label: '3D', hint: 'Photo or segment columns in 3D' },
   { key: 'compare', label: 'Compare', hint: 'Cross-tabulate any two attributes' },
   { key: 'time', label: 'Time', hint: 'Imagery, capture and annotation dates' },
@@ -25,7 +26,7 @@ const VIEWS: { key: View; label: string; hint: string }[] = [
   { key: 'streets', label: 'Streets', hint: 'Street-by-street profiles' },
   { key: 'photos', label: 'Photos', hint: 'Browse matching source photos' },
 ];
-const DEFAULT_FACETS = ['footpath', 'tag:footpath_section:path_type', 'tag:footpath_section:surface', 'tag:footpath_section:continuity', 'feature_kind', 'tag:hazard:type', 'imagery_year', 'review_confirmation', 'side', 'highway'];
+const DEFAULT_FACETS = ['footpath', 'footpath_quality', 'tag:footpath_section:surface', 'tag:footpath_section:path_type', 'tag:footpath_section:continuity', 'feature_kind', 'tag:hazard:type', 'imagery_year', 'review_confirmation', 'side', 'highway'];
 const ago = (seconds: number) => seconds < 90 ? `${Math.round(seconds)} s ago` : `${Math.round(seconds / 60)} min ago`;
 
 function Facet({ atlas, id, onRemove }: { atlas: Atlas; id: string; onRemove: () => void }) {
@@ -139,11 +140,11 @@ export default function Visualiser({ jobs, status, onBack }: { jobs: JobSummary[
     ...(filters.tagged ? [{ key: 'tagged', label: `Annotated ${minuteDate(filters.tagged[0]).toLocaleDateString('en-AU', { timeZone: 'UTC' })} – ${minuteDate(filters.tagged[1]).toLocaleDateString('en-AU', { timeZone: 'UTC' })}`, clear: () => setFiltersAndReset({ ...filters, tagged: undefined }) }] : []),
   ] : [];
   const showDetail = !!atlas && (selectedPhoto !== null || !!group);
-  const viewBody = !atlas ? null : view === 'overview' ? <Overview atlas={atlas} /> : view === 'map' ? <AtlasMap atlas={atlas} />
+  const viewBody = !atlas ? null : view === 'overview' ? <Overview atlas={atlas} /> : view === 'map' || view === 'heatmap' ? <AtlasMap key={view} atlas={atlas} heatmap={view === 'heatmap'} />
     : view === '3d' ? <Suspense fallback={<div className="viz-empty">Loading 3D renderer…</div>}><Observation3D atlas={atlas} /></Suspense>
       : view === 'compare' ? <Compare atlas={atlas} /> : view === 'time' ? <Timeline atlas={atlas} /> : view === 'coverage' ? <Coverage atlas={atlas} />
         : view === 'streets' ? <Streets atlas={atlas} /> : <Gallery atlas={atlas} />;
-  const canvasView = view === 'map' || view === '3d';
+  const canvasView = view === 'map' || view === 'heatmap' || view === '3d';
   return <div className={`visualiser ${focused ? 'viz-focused' : ''} ${collapsed ? 'viz-collapsed' : ''}`}>
     <header className="viz-header">
       <div className="viz-brand"><button className="wordmark" onClick={onBack}>maply<span> / </span></button><div><strong>Accessibility atlas</strong><span>{data ? data.job_name : 'Explore the evidence in your streets'}</span></div></div>

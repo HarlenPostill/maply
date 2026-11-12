@@ -3,7 +3,7 @@ import L from 'leaflet';
 import type { Atlas } from './context';
 import { Legend } from './charts';
 import { escapeHtml as esc } from './download';
-import { fmt, gridCells, heat, percent, photoCategory, segmentComposition, tally, type Dataset, type Dimension } from './model';
+import { fmt, gridCells, heat, percent, photoCategory, photoCodes, segmentComposition, tally, type Dataset, type Dimension } from './model';
 
 type Mode = 'photos' | 'segments' | 'grid';
 
@@ -95,7 +95,7 @@ export function photoTitle(ds: Dataset, i: number, dim: Dimension) {
   return `${ds.p.code[i]} · ${ds.snapshot.streets[ds.p.street[i]]} · ${k >= 0 ? dim.categories[k].label : '—'}`;
 }
 
-export default function AtlasMap({ atlas }: { atlas: Atlas }) {
+export default function AtlasMap({ atlas, heatmap = false }: { atlas: Atlas; heatmap?: boolean }) {
   const { ds, sel, colorBy, status, focus } = atlas;
   const host = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
@@ -103,7 +103,7 @@ export default function AtlasMap({ atlas }: { atlas: Atlas }) {
   const dots = useRef<DotLayer | null>(null);
   const fitted = useRef('');
   const latest = useRef(atlas); latest.current = atlas;
-  const [mode, setMode] = useState<Mode>('photos');
+  const [mode, setMode] = useState<Mode>(heatmap ? 'grid' : 'photos');
   const [cell, setCell] = useState(100);
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
   const modeRef = useRef(mode); modeRef.current = mode;
@@ -189,11 +189,10 @@ export default function AtlasMap({ atlas }: { atlas: Atlas }) {
       const max = Math.max(1, ...cells.map((c) => c.photos.length));
       for (const c of cells) {
         const d = dominant(colorBy, c.counts, 0);
-        let known = 0;
-        colorBy.categories.forEach((cat, k) => { if (!cat.structural) known += c.counts[k]; });
+        const known = c.photos.filter((i) => photoCodes(colorBy, i).some((k) => !colorBy.categories[k].structural)).length;
         const share = focusIndex >= 0 && known ? c.counts[focusIndex] / known : null;
-        const color = focusIndex >= 0 ? (share === null ? '#c5ccd0' : heat(.1 + share * .9)) : d.best >= 0 ? colorBy.categories[d.best].color : '#c5ccd0';
-        const rect = L.rectangle([[c.south, c.west], [c.north, c.east]], { color: '#fff', weight: .6, fillColor: color, fillOpacity: focusIndex >= 0 ? .78 : .25 + .6 * Math.sqrt(c.photos.length / max) });
+        const color = focusIndex >= 0 ? (share === null ? '#c5ccd0' : heat(share)) : heatmap ? heat(c.photos.length / max) : d.best >= 0 ? colorBy.categories[d.best].color : '#c5ccd0';
+        const rect = L.rectangle([[c.south, c.west], [c.north, c.east]], { color: '#fff', weight: .6, fillColor: color, fillOpacity: focusIndex >= 0 || heatmap ? .78 : .25 + .6 * Math.sqrt(c.photos.length / max) });
         rect.bindTooltip(() => {
           const parts = colorBy.categories.map((cat, k) => ({ cat, v: c.counts[k] })).filter((x) => x.v).sort((a, b) => b.v - a.v).slice(0, 5);
           return `${fmt(c.photos.length)} photos${share !== null ? ` · ${percent(share)} ${esc(colorBy.categories[focusIndex].label.toLowerCase())} of ${fmt(known)} known` : ''}<br>${parts.map((x) => `${esc(x.cat.label)}: ${fmt(x.v)}`).join('<br>')}`;
@@ -202,7 +201,7 @@ export default function AtlasMap({ atlas }: { atlas: Atlas }) {
         rect.addTo(group);
       }
     }
-  }, [ds, sel, colorBy, mode, cell, focusIndex]);
+  }, [ds, sel, colorBy, mode, cell, focusIndex, heatmap]);
 
   // Fit to the current selection when the fit key changes.
   useEffect(() => {
@@ -219,19 +218,23 @@ export default function AtlasMap({ atlas }: { atlas: Atlas }) {
   }, [atlas.selectedPhoto, ds]);
 
   return <div className="viz-map-wrap">
-    <div className="viz-map" ref={host} aria-label={`Map of ${fmt(sel.photos)} photos coloured by ${colorBy.label}`} />
+    <div className="viz-map" ref={host} aria-label={heatmap ? `Heatmap of ${fmt(sel.photos)} photos` : `Map of ${fmt(sel.photos)} photos coloured by ${colorBy.label}`} />
     {hover && <div className="viz-map-hover" style={{ left: hover.x + 14, top: hover.y + 10 }}>{hover.text}</div>}
     <div className="viz-map-controls">
-      <div className="seg" role="group" aria-label="Map layer">{(['photos', 'segments', 'grid'] as Mode[]).map((m) => <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === 'photos' ? 'Photos' : m === 'segments' ? 'Segments' : 'Grid'}</button>)}</div>
+      {!heatmap && <div className="seg" role="group" aria-label="Map layer">{(['photos', 'segments', 'grid'] satisfies Mode[]).map((m) => <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === 'photos' ? 'Photos' : m === 'segments' ? 'Segments' : 'Grid'}</button>)}</div>}
       {mode === 'grid' && <label>Cell <select aria-label="Grid cell size" value={cell} onChange={(e) => setCell(Number(e.target.value))}>{[50, 100, 200, 400].map((n) => <option key={n} value={n}>{n} m</option>)}</select></label>}
       <label>Highlight <select aria-label="Highlight value" value={focus ?? ''} onChange={(e) => atlas.setFocus(e.target.value || null)}>
-        <option value="">{mode === 'photos' ? 'All values' : 'Most common value'}</option>
+        <option value="">{heatmap ? 'Photo density' : mode === 'photos' ? 'All values' : 'Most common value'}</option>
         {colorBy.categories.filter((c, k) => !c.structural && legendTally.counts[k] > 0).map((c) => <option key={c.key} value={c.key}>{mode === 'photos' ? c.label : `Share: ${c.label}`}</option>)}
       </select></label>
     </div>
-    <Legend title={`${colorBy.label} · ${fmt(sel.photos)} photos`} categories={colorBy.categories} counts={legendTally.counts}
+    {heatmap && <div className="viz-map-hover viz-heatmap-scale" role="status">
+      {focusIndex >= 0 ? `0% → 100% ${colorBy.categories[focusIndex].label.toLowerCase()} among photos with a known value. Grey cells have no assessed values.` : 'Low → high photo density, relative to the busiest selected grid cell. Counts reflect capture density, not unique defects.'}
+      <div aria-hidden="true" style={{ height: 8, marginTop: 6, background: `linear-gradient(to right, ${heat(0)}, ${heat(.5)}, ${heat(1)})` }} />
+    </div>}
+    <Legend title={`${heatmap && focusIndex < 0 ? 'Photo density · breakdown by ' : ''}${colorBy.label} · ${fmt(sel.photos)} photos`} categories={colorBy.categories} counts={legendTally.counts}
       selected={atlas.filters.cats[colorBy.id]} onToggle={(key, only) => atlas.toggle(colorBy.id, key, only)}
-      note={mode === 'photos'
+      note={heatmap && focusIndex < 0 ? 'Darker cells contain more selected photos. Category swatches below filter the data; they do not represent cell colours. Choose Highlight to map a category’s assessed share.' : mode === 'photos'
         ? `${colorBy.level === 'feature' ? 'Photos with several values show their rarest one. ' : ''}Camera positions (planned where unavailable), not surveyed feature locations. Click a value to filter.`
         : focusIndex >= 0 ? `Darker = larger share of ${colorBy.categories[focusIndex].label.toLowerCase()} among photos with a known value. Grey = no known value.`
           : `Colour = most common known value ${mode === 'grid' ? 'in each cell; stronger = more photos' : 'on each segment'}. Choose a highlight for shares.`} />

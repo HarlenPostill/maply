@@ -66,6 +66,21 @@ test('incomplete columns are rejected', () => {
   assert.throws(() => parseSnapshot(bad), /incomplete/);
 });
 
+test('footpath quality separates defects, unassessed quality, absence and missing annotation', () => {
+  const ds = buildDataset(parseSnapshot(snapshot([
+    { signals: 1 << 2 }, { signals: 2 << 2 }, { signals: 0 },
+    { footpath: 1, signals: 0 }, { annotation: 0, signals: -1 },
+  ], [])));
+  const dims = buildDimensions(ds);
+  const map = new Map(dims.map((d) => [d.id, d]));
+  const dim = map.get('footpath_quality');
+  const all = applyFilters(ds, map, emptyFilters());
+  assert.deepEqual(counts(dim, tally(ds, dim, all, 'photos')), {
+    no_visible_defect: 1, concern: 1, not_assessed: 1, no_footpath: 1, not_annotated: 1,
+  });
+  assert.equal(applyFilters(ds, map, toggleCategory(emptyFilters(), dim.id, 'concern')).photos, 1);
+});
+
 test('not recorded, unknown, missing kind and not annotated stay distinct', () => {
   const { ds, map } = fixture();
   const dim = map.get('tag:footpath_section:condition');

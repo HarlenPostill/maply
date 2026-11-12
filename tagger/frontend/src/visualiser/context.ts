@@ -1,7 +1,7 @@
 import type { Status } from '../api';
 import type { Dataset, Dimension, Filters, Selection, Unit } from './model';
 
-export type View = 'overview' | 'map' | '3d' | 'compare' | 'time' | 'coverage' | 'streets' | 'photos';
+export type View = 'overview' | 'map' | 'heatmap' | '3d' | 'compare' | 'time' | 'coverage' | 'streets' | 'photos';
 export type Group = { title: string; subtitle: string; photos: number[] };
 
 /** Everything a view needs. Selections are recomputed centrally so every view stays linked. */

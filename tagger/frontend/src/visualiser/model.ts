@@ -272,6 +272,22 @@ export function buildDimensions(ds: Dataset): Dimension[] {
     description: 'The overall footpath observation for each annotated photo. Absence claims require clear visibility.',
     code: (i) => annotated(i) ? Math.max(0, p.footpath[i]) : 3,
   });
+  const qualityMetric = vocab.metrics.indexOf('quality');
+  singleDim({
+    id: 'footpath_quality', label: 'Footpath quality', group: 'Footpath',
+    values: ['no_visible_defect', 'concern', 'not_assessed', 'no_footpath', 'not_annotated'],
+    labels: ['No visible defect reported', 'Visible quality concern', 'Quality not assessed', 'No footpath', 'Not annotated'],
+    colors: [NO_CONCERN, CONCERN, NOT_RECORDED, '#72549a', ABSENT],
+    structural: ['not_assessed', 'no_footpath', 'not_annotated'],
+    description: `Observed quality, not a severity grade. ${METRIC_INFO.quality.rule} Missing footpaths and unassessed quality remain separate.`,
+    code: (i) => {
+      if (!annotated(i)) return 4;
+      if (p.footpath[i] === vocab.presence.indexOf('absent')) return 3;
+      if (qualityMetric < 0 || p.signals[i] < 0) return 2;
+      const signal = (p.signals[i] >> (2 * qualityMetric)) & 3;
+      return signal === 2 ? 1 : signal === 1 ? 0 : 2;
+    },
+  });
   const sides = ['left', 'right', 'none'];
   singleDim({ id: 'side', label: 'Planned street side', group: 'Place', values: sides, labels: ['Left side', 'Right side', 'Side unspecified'],
     description: 'Relative to the planned segment direction.', code: (i) => p.side[i] });

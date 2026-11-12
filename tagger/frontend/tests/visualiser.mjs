@@ -85,6 +85,19 @@ try {
   await page.screenshot({ path: `${output}/map-grid-year.png` });
   step('map photos, segment shares and grid by imagery year');
 
+  await tab('Heatmap').click();
+  await page.getByLabel('Colour by').selectOption('footpath_quality');
+  await page.getByLabel('Grid cell size').selectOption('200');
+  await page.getByRole('status').filter({ hasText: 'photo density' }).waitFor();
+  await page.getByLabel('Highlight value').selectOption('concern');
+  await page.getByRole('status').filter({ hasText: '0% → 100%' }).waitFor();
+  await page.locator('.leaflet-overlay-pane canvas').first().waitFor();
+  await page.screenshot({ path: `${output}/heatmap-quality.png` });
+  await page.getByLabel('Highlight value').selectOption('');
+  await tab('Map').click();
+  await page.getByRole('group', { name: 'Map layer' }).getByRole('button', { name: 'Photos', exact: true }).waitFor();
+  step('quality heatmap shows density and assessed concern shares; Map restores photo controls');
+
   // 3D renders every photo.
   await page.getByLabel('Colour by').selectOption('tag:footpath_section:surface');
   await tab('3D').click();
