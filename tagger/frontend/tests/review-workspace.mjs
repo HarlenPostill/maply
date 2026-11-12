@@ -49,7 +49,7 @@ const server = createServer(async (req, res) => {
   } catch (error) { res.writeHead(500).end(String(error)); }
 });
 await new Promise((ready) => server.listen(0, '127.0.0.1', ready));
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
 const page = await browser.newPage({ viewport: { width: 1512, height: 1100 } });
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));

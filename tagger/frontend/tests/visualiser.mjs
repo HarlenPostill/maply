@@ -1,5 +1,5 @@
 // Uses a real, read-only snapshot and GET-only app proxy; never starts the app or database.
-// MAPLY_SNAPSHOT=/path/to/job.json npm run test:visualiser
+// npm run build && MAPLY_SNAPSHOT=/path/to/job.json npm run test:visualiser
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
@@ -8,18 +8,21 @@ import assert from 'node:assert/strict';
 
 if (!process.env.MAPLY_SNAPSHOT) throw new Error('Set MAPLY_SNAPSHOT to a read-only exported job snapshot.');
 const snapshot = JSON.parse(await readFile(process.env.MAPLY_SNAPSHOT, 'utf8'));
+assert.equal(snapshot.version, 2, 'Snapshot must be version 2');
 const upstream = process.env.MAPLY_READ_API || 'http://127.0.0.1:8000';
 const output = process.env.MAPLY_TEST_OUTPUT || '/tmp/maply-visualiser-test';
 await mkdir(output, { recursive: true });
 let failSnapshots = false;
-let requests = 0;
+let full = 0, metas = 0;
+const meta = () => ({ version: 2, job_id: snapshot.job_id, digest: snapshot.digest, generated_at: snapshot.generated_at, checked_at: new Date().toISOString() });
 const server = createServer(async (req, res) => {
   try {
     if (req.method !== 'GET') { res.writeHead(405).end(); return; }
     const path = new URL(req.url, 'http://localhost').pathname;
     if (path.startsWith('/assets/accessibility/')) {
-      requests++;
       if (failSnapshots) { res.writeHead(503).end('Unavailable'); return; }
+      if (path.endsWith('.meta.json')) { metas++; res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(meta())); return; }
+      full++;
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(snapshot)); return;
     }
     if (path.startsWith('/api/') || path.startsWith('/files/')) {
@@ -35,161 +38,147 @@ const server = createServer(async (req, res) => {
   } catch (e) { res.writeHead(500).end(String(e)); }
 });
 await new Promise((ready) => server.listen(0, '127.0.0.1', ready));
-const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ viewport: { width: 1512, height: 1100 } });
+// PLAYWRIGHT_CHANNEL=chrome uses an installed Chrome instead of Playwright's downloaded browser.
+const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
+const page = await browser.newPage({ viewport: { width: 1512, height: 1000 } });
 const errors = [];
 page.on('pageerror', (error) => errors.push(error.stack || error.message));
+const n = snapshot.photos.id.length;
+const footpathAbsent = snapshot.photos.footpath.filter((v, i) => v === 1 && snapshot.photos.annotation[i] === 1).length;
+const result = () => page.locator('.viz-result b').first().textContent();
+const tab = (name) => page.getByRole('navigation', { name: 'Atlas views' }).getByRole('button', { name, exact: true });
+const step = (name) => console.log(`✓ ${name}`);
 try {
   await page.addInitScript(() => {
     window.__maplyDrawCounts = [];
     const draw = WebGL2RenderingContext.prototype.drawElementsInstanced;
-    WebGL2RenderingContext.prototype.drawElementsInstanced = function (...args) {
-      window.__maplyDrawCounts.push(args[4]);
-      return draw.apply(this, args);
-    };
+    WebGL2RenderingContext.prototype.drawElementsInstanced = function (...args) { window.__maplyDrawCounts.push(args[4]); return draw.apply(this, args); };
   });
   await page.clock.install();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
-  console.log('Loaded app');
   await page.getByRole('button', { name: 'Accessibility atlas ↗' }).click();
-  await page.getByRole('heading', { name: 'Tagging coverage' }).waitFor();
-  console.log('Opened atlas');
-  const tagged = snapshot.segments.reduce((sum, s) => sum + s.tagged, 0);
-  await page.getByText(tagged.toLocaleString(), { exact: true }).waitFor();
-  await page.locator('.leaflet-tile-loaded').first().waitFor();
-  await page.screenshot({ path: `${output}/map.png` });
-  await page.getByRole('button', { name: 'Street comparison', exact: true }).click();
-  await page.locator('.viz-table tbody tr').first().waitFor();
-  assert.ok(await page.locator('.viz-table tbody tr').count() > 10);
-  await page.getByRole('button', { name: /Narrowed or blocked passage/ }).click();
-  await page.getByRole('heading', { name: 'Narrowed or blocked passage' }).waitFor();
-  await page.screenshot({ path: `${output}/streets.png` });
-  const example = snapshot.segments.find((s) => s.metrics.passage.flagged && s.examples.length);
-  assert.ok(example, 'Live snapshot has a passage concern to inspect');
-  await page.getByLabel('Street', { exact: true }).selectOption(example.street);
-  await page.getByRole('button', { name: 'Map', exact: true }).click();
-  await page.getByLabel('Inspect street segment').selectOption(example.key);
-  await page.locator('.viz-evidence-photo').waitFor();
-  assert.equal(await page.locator('.viz-evidence-photo').evaluate((image) => image.complete && image.naturalWidth > 0), true);
-  await page.screenshot({ path: `${output}/evidence.png` });
-  await page.getByRole('button', { name: 'Close segment evidence' }).click();
-  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  await page.getByRole('button', { name: '3D landscape', exact: true }).click();
+  await page.locator('.viz-hero-tile strong').first().getByText(n.toLocaleString('en-AU'), { exact: true }).waitFor({ timeout: 60000 });
+  await page.screenshot({ path: `${output}/overview.png`, fullPage: true });
+  step('overview shows every planned photo');
+
+  // Linked filtering from a chart bar.
+  await page.locator('.viz-card').filter({ hasText: 'Footpath presence' }).locator('button.viz-bar-row', { hasText: 'Absent' }).first().click();
+  await page.locator('.viz-chip', { hasText: 'Footpath presence: Absent' }).waitFor();
+  assert.equal(await result(), footpathAbsent.toLocaleString('en-AU'));
+  await page.getByRole('button', { name: 'Clear all filters' }).click();
+  assert.equal(await result(), n.toLocaleString('en-AU'));
+  step('chart bars filter every view and clear');
+
+  // Map with categorical legend filter.
+  await tab('Map').click();
+  await page.locator('.leaflet-tile-loaded').first().waitFor({ timeout: 30000 }).catch(() => console.log('  (basemap tiles unavailable)'));
+  await page.locator('.viz-legend-rows button', { hasText: 'Asphalt' }).first().click();
+  await page.locator('.viz-chip', { hasText: 'surface: Asphalt' }).waitFor();
+  assert.ok(Number((await result()).replaceAll(',', '')) > 100);
+  await page.screenshot({ path: `${output}/map-asphalt.png` });
+  await page.getByRole('button', { name: 'Clear all filters' }).click();
+  await page.getByRole('group', { name: 'Map layer' }).getByRole('button', { name: 'Segments' }).click();
+  await page.getByLabel('Highlight value').selectOption({ label: 'Share: Brick pavers' });
+  await page.screenshot({ path: `${output}/map-segments-share.png` });
+  await page.getByRole('group', { name: 'Map layer' }).getByRole('button', { name: 'Grid' }).click();
+  await page.getByLabel('Colour by').selectOption('imagery_year');
+  await page.screenshot({ path: `${output}/map-grid-year.png` });
+  step('map photos, segment shares and grid by imagery year');
+
+  // 3D renders every photo.
+  await page.getByLabel('Colour by').selectOption('tag:footpath_section:surface');
+  await tab('3D').click();
   await page.locator('.viz-three canvas').waitFor();
-  await page.waitForFunction(() => document.querySelector('.viz-three canvas')?.width > 500);
-  await page.screenshot({ path: `${output}/3d.png` });
-  await page.getByLabel('Column height', { exact: true }).fill('0.3');
-  await page.screenshot({ path: `${output}/3d-low.png` });
-  assert.notDeepEqual(await readFile(`${output}/3d.png`), await readFile(`${output}/3d-low.png`), 'Height slider changes the rendered columns');
-  assert.equal(await page.getByLabel('3D data points').inputValue(), 'photos');
-  await page.waitForFunction((count) => window.__maplyDrawCounts.includes(count), snapshot.points.length);
-  await page.getByLabel('3D data points').selectOption('segments');
-  await page.getByLabel('Height represents').selectOption('count');
-  await page.getByLabel('3D minimum observations').selectOption('10');
-  await page.getByRole('button', { name: 'Focus view', exact: true }).click();
-  await page.getByRole('button', { name: 'Hide sidebar', exact: true }).click();
-  assert.equal(await page.locator('.viz-sidebar').isVisible(), false);
-  assert.equal(await page.locator('.viz-stats').isVisible(), false);
-  await page.waitForFunction(() => document.querySelector('.viz-three canvas').getBoundingClientRect().height > window.innerHeight - 190);
-  await page.screenshot({ path: `${output}/3d-focused.png` });
-  await page.getByRole('button', { name: 'Show sidebar', exact: true }).click();
-  assert.equal(await page.locator('.viz-sidebar').isVisible(), true);
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.viz-stats').isVisible(), true);
-  await page.getByLabel('Height represents').selectOption('rate');
-  await page.getByLabel('3D minimum observations').selectOption('1');
-  await page.getByLabel('Column height', { exact: true }).fill('1');
-  await page.screenshot({ path: `${output}/3d.png` });
-  const canvas = page.locator('.viz-three canvas');
-  await canvas.focus(); await canvas.press('ArrowLeft'); await canvas.press('+');
-  await page.screenshot({ path: `${output}/3d-orbit.png` });
-  assert.notDeepEqual(await readFile(`${output}/3d.png`), await readFile(`${output}/3d-orbit.png`), 'Camera changes rendered scene');
-  const beforeAuto = requests;
-  snapshot.generated_at = new Date().toISOString();
-  snapshot.segments[0].planned += 1;
+  await page.waitForFunction((count) => window.__maplyDrawCounts.includes(count), n);
+  await page.getByLabel('Height represents').selectOption('age');
+  await page.screenshot({ path: `${output}/3d-age.png` });
+  await page.getByRole('group', { name: '3D data points' }).getByRole('button', { name: 'Segments' }).click();
+  await page.screenshot({ path: `${output}/3d-segments.png` });
+  step('3D renders all photos and segment columns');
+
+  // Cross analysis.
+  await tab('Compare').click();
+  await page.getByRole('button', { name: 'Hazard type × persistence' }).click();
+  await page.locator('.viz-matrix tbody td button').first().waitFor();
+  await page.screenshot({ path: `${output}/compare.png`, fullPage: true });
+  await page.locator('.viz-matrix tbody td button', { hasText: /\d/ }).first().click();
+  assert.equal(await page.locator('.viz-chip').count() >= 3, true, 'matrix cell sets both filters');
+  await page.getByRole('button', { name: 'Clear all filters' }).click();
+  step('compare matrix filters to a cell');
+
+  // Dates.
+  await tab('Time').click();
+  const chart = page.getByRole('img', { name: 'Imagery month histogram' });
+  await chart.waitFor();
+  const box = await chart.boundingBox();
+  await page.mouse.move(box.x + box.width * .6, box.y + box.height * .5);
+  await page.mouse.down(); await page.mouse.move(box.x + box.width * .9, box.y + box.height * .5, { steps: 4 }); await page.mouse.up();
+  await page.locator('.viz-chip', { hasText: 'Imagery' }).waitFor();
+  await page.screenshot({ path: `${output}/time.png`, fullPage: true });
+  await page.getByRole('button', { name: 'Clear all filters' }).click();
+  step('imagery month brushing');
+
+  await tab('Coverage').click();
+  await page.locator('.viz-coverage-table tbody tr').first().waitFor();
+  await page.screenshot({ path: `${output}/coverage.png`, fullPage: true });
+  await tab('Streets').click();
+  assert.ok(await page.locator('.viz-street-table tbody tr').count() > 10);
+  step('coverage and streets');
+
+  // Source photo drilldown.
+  await tab('Photos').click();
+  await page.locator('.viz-thumb img').first().waitFor({ timeout: 30000 });
+  await page.locator('.viz-thumb').first().click();
+  await page.locator('.viz-detail img').first().waitFor({ timeout: 30000 });
+  assert.equal(await page.locator('.viz-detail img').first().evaluate((image) => image.complete && image.naturalWidth > 0), true);
+  await page.screenshot({ path: `${output}/evidence.png` });
+  await page.getByRole('button', { name: 'Close evidence' }).click();
+  step('gallery thumbnails and evidence');
+
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('.viz-export summary').click();
+  await page.getByRole('button', { name: 'Photos (CSV)' }).click();
+  const download = await downloadPromise;
+  assert.ok(download.suggestedFilename().endsWith('-photos.csv'));
+  await page.locator('.viz-export summary').click();
+  step('filtered export');
+
+  // Refresh: meta polling, full download only on digest change, pause, failure and recovery.
+  const before = full;
   await page.clock.fastForward(30001);
-  await page.waitForFunction((planned) => document.querySelector('.viz-stat small')?.textContent.includes(planned.toLocaleString()), snapshot.segments.reduce((sum, s) => sum + s.planned, 0));
-  assert.ok(requests > beforeAuto, 'Automatic refresh fetches new observations');
-  const before = requests;
+  await page.waitForFunction(() => true);
+  assert.equal(full, before, 'unchanged digest does not re-download the snapshot');
+  snapshot.digest = 'changed-digest';
+  await page.clock.fastForward(30001);
+  await page.waitForFunction(() => document.querySelector('.viz-live')?.textContent.includes('Live'));
+  for (let i = 0; i < 50 && full === before; i++) await page.waitForTimeout(100);
+  assert.ok(full > before, 'changed digest downloads the new snapshot');
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
-  snapshot.generated_at = new Date().toISOString();
-  snapshot.segments[0].planned += 1;
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await page.waitForFunction((planned) => document.querySelector('.viz-stat small')?.textContent.includes(planned.toLocaleString()), snapshot.segments.reduce((sum, s) => sum + s.planned, 0));
-  assert.ok(requests > before, 'Manual refresh fetches new observations');
-  assert.equal(await page.getByRole('button', { name: '3D landscape', exact: true }).getAttribute('aria-pressed'), 'true');
+  const pausedMeta = metas;
+  await page.clock.fastForward(60001);
+  assert.equal(metas, pausedMeta, 'paused atlas makes no periodic requests');
   failSnapshots = true;
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await page.getByRole('alert').waitFor();
-  assert.equal(await page.locator('.viz-three canvas').count(), 1, 'Last successful scene survives refresh failure');
+  assert.equal(await page.locator('.viz-gallery-grid').count(), 1, 'last successful view survives refresh failure');
   failSnapshots = false;
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await page.getByRole('alert').waitFor({ state: 'hidden' });
-  const pausedRequests = requests;
-  await page.clock.fastForward(60001);
-  assert.equal(requests, pausedRequests, 'Paused visualiser makes no periodic snapshot requests');
-  await page.getByRole('button', { name: 'Insights', exact: true }).click();
-  await page.getByRole('heading', { name: 'Street profiles across all measures' }).waitFor();
-  assert.equal(await page.locator('.viz-heatmap thead th').count(), 9);
-  assert.ok(await page.locator('.viz-insight-card circle').count() > 0);
-  await page.screenshot({ path: `${output}/insights.png` });
-  const originalRows = await page.locator('.viz-heatmap tbody tr').count();
-  await page.getByLabel('Insights minimum observations').selectOption('50');
-  assert.ok(await page.locator('.viz-heatmap tbody tr').count() <= originalRows);
-  await page.getByLabel('Insights minimum observations').selectOption('5');
-  await page.locator('.viz-heatmap tbody button:not(:disabled)').first().click();
-  assert.equal(await page.getByRole('button', { name: 'Map', exact: true }).getAttribute('aria-pressed'), 'true');
-  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  await page.getByRole('button', { name: /^Footpath quality/ }).click();
-  await page.getByRole('heading', { name: 'Footpath quality', exact: true }).waitFor();
-  await page.getByLabel('Individual footpath photo observations').waitFor();
-  await page.screenshot({ path: `${output}/quality-photos.png` });
-  await page.getByRole('button', { name: 'Heatmap', exact: true }).click();
-  await page.getByLabel('Photo observation grid heatmap').waitFor();
-  await page.getByLabel('Heatmap grid size').selectOption('50');
-  await page.getByLabel('Heatmap minimum observations').selectOption('5');
-  await page.getByLabel('Heatmap intensity').selectOption('count');
-  await page.screenshot({ path: `${output}/quality-heatmap.png` });
-  await page.getByRole('button', { name: /^Missing footpath/ }).click();
-  await page.getByLabel('Heatmap intensity').selectOption('rate');
-  await page.screenshot({ path: `${output}/missing-heatmap.png` });
-  const byStreet = new Map();
-  for (const point of snapshot.points) { const list = byStreet.get(point.street) ?? []; list.push(point); byStreet.set(point.street, list); }
-  const cellPhotos = [...byStreet.values()].find((photos) => new Set(photos.map((p) => `${Math.floor((p.coordinates[0] - 151.21) * 92300 / 200)}:${Math.floor((p.coordinates[1] + 33.88) * 111320 / 200)}`)).size === 1);
-  assert.ok(cellPhotos, 'A street fits in one heatmap cell for source inspection');
-  const single = cellPhotos[0];
-  await page.getByLabel('Heatmap grid size').selectOption('200');
-  await page.getByLabel('Street', { exact: true }).selectOption(single.street);
-  await page.getByLabel('Heatmap minimum observations').selectOption('1');
-  const heatBounds = await page.getByLabel('Photo observation grid heatmap').boundingBox();
-  await page.mouse.click(heatBounds.x + heatBounds.width / 2, heatBounds.y + heatBounds.height / 2);
-  await page.getByLabel('Inspect heatmap photo').selectOption(single.id);
-  await page.locator('.viz-photo-meta strong').getByText(single.code, { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Close segment evidence' }).click();
-  await page.getByRole('button', { name: 'Clear filters', exact: true }).click();
-  await page.getByRole('button', { name: '3D landscape', exact: true }).click();
-  assert.equal(await page.getByLabel('3D data points').inputValue(), 'photos');
-  await page.waitForFunction((count) => window.__maplyDrawCounts.includes(count), snapshot.points.length);
-  await page.screenshot({ path: `${output}/all-photo-columns.png` });
-  const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export CSV' }).click();
-  const download = await downloadPromise;
-  assert.ok(download.suggestedFilename().endsWith('.csv'));
+  step('refresh, pause and recovery');
+
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  await tab('Overview').click();
   await page.screenshot({ path: `${output}/mobile.png`, fullPage: true });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile has no horizontal page overflow');
-  await page.getByRole('button', { name: '3D landscape', exact: true }).click();
-  await page.getByRole('button', { name: 'Focus view', exact: true }).click();
-  await page.getByRole('button', { name: 'Hide sidebar', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.viz-three canvas')?.getBoundingClientRect().height > 400);
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile focus has no page overflow');
-  await page.screenshot({ path: `${output}/mobile-focus.png` });
-  await page.getByRole('button', { name: 'Exit focus', exact: true }).click();
+  await tab('Map').click();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile map has no page overflow');
+  await page.screenshot({ path: `${output}/mobile-map.png`, fullPage: true });
+  step('mobile layout');
+  await page.setViewportSize({ width: 1512, height: 1000 });
   await page.getByRole('button', { name: '← Capture workspace' }).click();
-  await page.getByRole('heading', { name: 'Jobs', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Accessibility atlas ↗' }).waitFor();
   assert.deepEqual(errors, []);
-  console.log('PASS: real-data map, street comparison, evidence, 3D height/count controls, full-height focus, sidebar collapse, insights, refresh/recovery, CSV, mobile and capture navigation.');
+  console.log('PASS: overview, linked filters, map modes, 3D, compare, dates, coverage, streets, gallery evidence, export, refresh/recovery, mobile and navigation.');
 } catch (error) {
   await page.screenshot({ path: `${output}/failure.png`, fullPage: true });
   console.error('Page errors:', errors);

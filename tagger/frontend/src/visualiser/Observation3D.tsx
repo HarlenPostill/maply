@@ -1,60 +1,78 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { colour, measure, pointColour, pointSignal, pointLegend, type PhotoPoint, type Metric, type Segment } from './data';
+import type { Atlas } from './context';
+import { Legend } from './charts';
+import { fmt, imageryAgeYears, photoCategory, segmentComposition, tally } from './model';
 
+type Mode = 'photos' | 'segments';
+type Height = 'uniform' | 'focus' | 'age' | 'notes' | 'confidence' | 'count' | 'share';
+type Item = { key: number; x: number; z: number; color: string; height: number; selected: boolean };
 type SceneState = {
-  scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls;
-  renderer: THREE.WebGLRenderer; content: THREE.Group;
-  columns: THREE.InstancedMesh | null; keys: string[]; fitKey: string; mode: 'photos' | 'segments';
+  scene: THREE.Scene; camera: THREE.PerspectiveCamera; controls: OrbitControls; renderer: THREE.WebGLRenderer;
+  content: THREE.Group; columns: THREE.InstancedMesh | null; keys: number[]; mode: Mode; fitKey: string;
   reset: () => void; render: () => void;
 };
+const HEIGHTS: Record<Mode, { key: Height; label: string; note: string }[]> = {
+  photos: [
+    { key: 'uniform', label: 'Uniform', note: 'Every photo the same height; colour carries the value.' },
+    { key: 'focus', label: 'Highlighted value', note: 'Tall columns show the highlighted value; others stay low.' },
+    { key: 'age', label: 'Imagery age', note: 'Height = years between imagery month and capture (max 15). Undated imagery stays flat.' },
+    { key: 'notes', label: 'Review notes', note: 'Height = review notes on the photo (max 10).' },
+    { key: 'confidence', label: 'Low confidence', note: 'Height = 100 − lowest model confidence (taller = less confident). Uncalibrated.' },
+  ],
+  segments: [
+    { key: 'count', label: 'Photo count', note: 'Height = matching photos on the segment, relative to the busiest segment.' },
+    { key: 'share', label: 'Share of highlighted value', note: 'Height = share of photos with the highlighted value among those with a known value.' },
+  ],
+};
+const project = (lng: number, lat: number) => [(lng - 151.21) * 92300, -(lat + 33.88) * 111320] as const;
+
 function disposeContent(group: THREE.Group) {
   group.traverse((item) => {
     if (item instanceof THREE.InstancedMesh) item.dispose();
     if (item instanceof THREE.Sprite) { item.material.map?.dispose(); item.material.dispose(); }
     if (item instanceof THREE.Mesh || item instanceof THREE.LineSegments) {
       item.geometry.dispose();
-      const materials = Array.isArray(item.material) ? item.material : [item.material];
-      materials.forEach((material) => material.dispose());
+      (Array.isArray(item.material) ? item.material : [item.material]).forEach((m) => m.dispose());
     }
   });
   group.clear();
 }
-export default function Observation3D({ rows, points, metric, selected, selectedPhoto, onSelect, onPhotoSelect, fitKey }: {
-  points: PhotoPoint[]; selectedPhoto: string | null; onPhotoSelect: (id: string) => void;
-  rows: Segment[]; metric: Metric; selected: string | null; onSelect: (key: string) => void; fitKey: string;
-}) {
+
+export default function Observation3D({ atlas }: { atlas: Atlas }) {
+  const { ds, sel, colorBy, focus } = atlas;
   const host = useRef<HTMLDivElement>(null);
   const state = useRef<SceneState | null>(null);
-  const select = useRef(onSelect); select.current = onSelect;
-  const selectPhoto = useRef(onPhotoSelect); selectPhoto.current = onPhotoSelect;
+  const latest = useRef(atlas); latest.current = atlas;
   const [error, setError] = useState('');
-  const [heightScale, setHeightScale] = useState(1);
-  const [minimum, setMinimum] = useState(1);
-  const [mode, setMode] = useState<'photos' | 'segments'>('photos');
+  const [mode, setMode] = useState<Mode>('photos');
+  const [height, setHeight] = useState<Height>('uniform');
+  const [scale, setScale] = useState(1);
   const [spread, setSpread] = useState(true);
-  const [heightMode, setHeightMode] = useState<'rate' | 'count'>('rate');
+  const focusIndex = focus ? colorBy.categories.findIndex((c) => c.key === focus) : -1;
+  const heightMode = HEIGHTS[mode].some((h) => h.key === height) ? height : HEIGHTS[mode][0].key;
+
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     let renderer: THREE.WebGLRenderer;
     try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
-    catch { setError('3D rendering is unavailable in this browser. The map and street comparisons contain the same observations.'); return; }
+    catch { setError('3D rendering is unavailable in this browser. The map and charts contain the same observations.'); return; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     el.appendChild(renderer.domElement);
     renderer.domElement.tabIndex = 0;
-    renderer.domElement.setAttribute('aria-label', '3D observations. Drag to orbit, scroll to zoom, right-drag to pan. Arrow keys rotate, plus and minus zoom.');
-    const scene = new THREE.Scene(); scene.background = new THREE.Color('#edf1f0');
+    renderer.domElement.setAttribute('aria-label', '3D observations. Drag to orbit, scroll to zoom, right-drag to pan. Arrow keys rotate, plus and minus zoom, Home resets.');
+    const scene = new THREE.Scene(); scene.background = new THREE.Color('#eef2f1');
+    scene.fog = new THREE.Fog('#eef2f1', 9000, 26000);
     const camera = new THREE.PerspectiveCamera(42, 1, 1, 100000);
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.maxPolarAngle = Math.PI / 2.05;
-    controls.minDistance = 40; controls.maxDistance = 40000;
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x697b80, 2.5));
-    const light = new THREE.DirectionalLight(0xffffff, 2.5); light.position.set(-1000, 4000, 2000); scene.add(light);
+    controls.maxPolarAngle = Math.PI / 2.05; controls.minDistance = 30; controls.maxDistance = 40000;
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x697b80, 2.4));
+    const light = new THREE.DirectionalLight(0xffffff, 2.2); light.position.set(-1000, 4000, 2000); scene.add(light);
     const content = new THREE.Group(); scene.add(content);
     const render = () => renderer.render(scene, camera);
-    const value: SceneState = { scene, camera, controls, renderer, content, columns: null, keys: [], fitKey: '', mode: 'photos', reset: () => {}, render };
+    const value: SceneState = { scene, camera, controls, renderer, content, columns: null, keys: [], mode: 'photos', fitKey: '', reset: () => {}, render };
     state.current = value;
     controls.addEventListener('change', render);
     const resize = new ResizeObserver(() => {
@@ -62,30 +80,34 @@ export default function Observation3D({ rows, points, metric, selected, selected
       renderer.setSize(w, h); camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix(); render();
     }); resize.observe(el);
     let down = { x: 0, y: 0 };
-    const pointerDown = (event: PointerEvent) => { down = { x: event.clientX, y: event.clientY }; };
-    const pointerUp = (event: PointerEvent) => {
-      if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5 || !value.columns) return;
+    const pointerDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
+    const pointerUp = (e: PointerEvent) => {
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5 || !value.columns) return;
       const rect = renderer.domElement.getBoundingClientRect();
       const ray = new THREE.Raycaster();
-      ray.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1), camera);
+      ray.setFromCamera(new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1), camera);
       const hit = ray.intersectObject(value.columns)[0];
-      if (hit?.instanceId !== undefined) {
-        if (value.mode === 'photos') selectPhoto.current(value.keys[hit.instanceId]);
-        else select.current(value.keys[hit.instanceId]);
+      if (hit?.instanceId === undefined) return;
+      const key = value.keys[hit.instanceId], a = latest.current;
+      if (value.mode === 'photos') a.selectPhoto(key);
+      else {
+        const list: number[] = [];
+        for (let i = 0; i < a.ds.n; i++) if (a.sel.photo[i] && a.ds.p.segment[i] === key) list.push(i);
+        const segs = a.ds.snapshot.segments;
+        a.selectGroup({ title: a.ds.snapshot.streets[segs.street[key]], subtitle: `Segment ${segs.key[key]}`, photos: list });
       }
     };
-    const keyDown = (event: KeyboardEvent) => {
-      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', 'Home'].includes(event.key)) return;
-      event.preventDefault();
-      if (event.key === 'Home') { value.reset(); return; }
-      const offset = camera.position.clone().sub(controls.target);
-      const sphere = new THREE.Spherical().setFromVector3(offset);
-      if (event.key === 'ArrowLeft') sphere.theta -= .12;
-      if (event.key === 'ArrowRight') sphere.theta += .12;
-      if (event.key === 'ArrowUp') sphere.phi = Math.max(.1, sphere.phi - .1);
-      if (event.key === 'ArrowDown') sphere.phi = Math.min(Math.PI / 2.05, sphere.phi + .1);
-      if (event.key === '+' || event.key === '=') sphere.radius *= .85;
-      if (event.key === '-') sphere.radius *= 1.15;
+    const keyDown = (e: KeyboardEvent) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', 'Home'].includes(e.key)) return;
+      e.preventDefault();
+      if (e.key === 'Home') { value.reset(); return; }
+      const sphere = new THREE.Spherical().setFromVector3(camera.position.clone().sub(controls.target));
+      if (e.key === 'ArrowLeft') sphere.theta -= .12;
+      if (e.key === 'ArrowRight') sphere.theta += .12;
+      if (e.key === 'ArrowUp') sphere.phi = Math.max(.1, sphere.phi - .1);
+      if (e.key === 'ArrowDown') sphere.phi = Math.min(Math.PI / 2.05, sphere.phi + .1);
+      if (e.key === '+' || e.key === '=') sphere.radius *= .85;
+      if (e.key === '-') sphere.radius *= 1.15;
       camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(sphere)); controls.update(); render();
     };
     renderer.domElement.addEventListener('pointerdown', pointerDown);
@@ -96,87 +118,110 @@ export default function Observation3D({ rows, points, metric, selected, selected
       renderer.domElement.remove(); state.current = null;
     };
   }, []);
+
+  const items = useMemo((): Item[] => {
+    const out: Item[] = [];
+    if (mode === 'photos') {
+      for (let i = 0; i < ds.n; i++) {
+        if (!sel.photo[i]) continue;
+        const k = photoCategory(colorBy, i), c = colorBy.categories[k];
+        let [x, z] = project(ds.p.lng[i], ds.p.lat[i]);
+        if (spread && ds.panoSize[i] > 1) {
+          let hash = 0; for (const ch of ds.p.id[i]) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+          const angle = (hash % 3600) / 3600 * Math.PI * 2, radius = 2.5 + (hash % 400) / 100;
+          x += Math.cos(angle) * radius; z += Math.sin(angle) * radius;
+        }
+        let h = .08;
+        if (heightMode === 'uniform') h = c?.structural ? .05 : .35;
+        else if (heightMode === 'focus') h = k === focusIndex ? 1 : .04;
+        else if (heightMode === 'age') h = ds.p.imagery_month[i] >= 0 && ds.p.captured[i] >= 0 ? Math.min(1, Math.max(0, imageryAgeYears(ds.p.imagery_month[i], ds.p.captured[i])) / 15) : 0;
+        else if (heightMode === 'notes') h = ds.p.review_reasons[i] > 0 ? Math.min(1, ds.p.review_reasons[i] / 10) : 0;
+        else if (heightMode === 'confidence') h = ds.minConf[i] >= 0 ? Math.min(1, (100 - ds.minConf[i]) / 50) : 0;
+        const dimmed = focusIndex >= 0 && heightMode !== 'focus' && k !== focusIndex;
+        out.push({ key: i, x, z, color: dimmed ? '#c3cacd' : c?.color ?? '#999', height: h, selected: i === atlas.selectedPhoto });
+      }
+    } else {
+      const comp = segmentComposition(ds, colorBy, sel), segs = ds.snapshot.segments;
+      const max = Math.max(1, ...comp.photos);
+      for (let s = 0; s < ds.segCount; s++) {
+        if (!comp.photos[s] || segs.coordinates[s].length < 2) continue;
+        const offset = s * comp.size;
+        let best = -1, value = 0, known = 0;
+        colorBy.categories.forEach((c, k) => { const v = comp.counts[offset + k]; if (!c.structural) { known += v; if (v > value) { value = v; best = k; } } });
+        const coords = segs.coordinates[s], mid = coords[Math.floor(coords.length / 2)];
+        const [x, z] = project((coords[0][0] + coords[coords.length - 1][0] + mid[0]) / 3, (coords[0][1] + coords[coords.length - 1][1] + mid[1]) / 3);
+        const share = focusIndex >= 0 && known ? comp.counts[offset + focusIndex] / known : 0;
+        out.push({ key: s, x, z, color: best >= 0 ? colorBy.categories[best].color : '#c5ccd0', height: heightMode === 'share' ? share : comp.photos[s] / max, selected: false });
+      }
+    }
+    return out;
+  }, [ds, sel, colorBy, mode, heightMode, focusIndex, spread, atlas.selectedPhoto]);
+
   useEffect(() => {
     const s = state.current;
     if (!s) return;
     disposeContent(s.content); s.columns = null; s.keys = [];
-    if (!rows.length) { s.render(); return; }
-    // A fixed Sydney origin keeps camera position stable as streamed data changes.
-    const project = ([lng, lat]: [number, number]) => new THREE.Vector3((lng - 151.21) * 92300, 0, -(lat + 33.88) * 111320);
-    const bounds = new THREE.Box3();
-    const vertices: number[] = [];
-    for (const row of rows) {
-      row.coordinates.forEach((coord) => bounds.expandByPoint(project(coord)));
-      for (let i = 1; i < row.coordinates.length; i++) {
-        vertices.push(...project(row.coordinates[i - 1]).toArray(), ...project(row.coordinates[i]).toArray());
-      }
+    const segs = ds.snapshot.segments, vertices: number[] = [];
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const item of items) { minX = Math.min(minX, item.x); maxX = Math.max(maxX, item.x); minZ = Math.min(minZ, item.z); maxZ = Math.max(maxZ, item.z); }
+    const used = new Set<number>();
+    for (let i = 0; i < ds.n; i++) if (sel.photo[i]) used.add(ds.p.segment[i]);
+    for (const seg of used) {
+      const c = segs.coordinates[seg];
+      for (let k = 1; k < (c?.length ?? 0); k++) { const a = project(c[k - 1][0], c[k - 1][1]), b = project(c[k][0], c[k][1]); vertices.push(a[0], 0, a[1], b[0], 0, b[1]); }
     }
-    const size = bounds.getSize(new THREE.Vector3()); const span = Math.max(size.x, size.z, 250);
-    const centre = bounds.getCenter(new THREE.Vector3());
-    const lines = new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3)), new THREE.LineBasicMaterial({ color: '#9dadae' }));
-    s.content.add(lines);
-    const grid = new THREE.GridHelper(Math.ceil(span / 500) * 500 + 1000, Math.ceil(span / 500) + 2, '#b9c8c7', '#d8e1df');
+    if (!Number.isFinite(minX)) { s.render(); return; }
+    const span = Math.max(maxX - minX, maxZ - minZ, 250), centre = new THREE.Vector3((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+    s.content.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3)), new THREE.LineBasicMaterial({ color: '#a7b5b6' })));
+    const grid = new THREE.GridHelper(Math.ceil(span / 500) * 500 + 1000, Math.ceil(span / 500) + 2, '#c3cfce', '#dce4e2');
     grid.position.copy(centre); grid.position.y = -2; s.content.add(grid);
     const label = document.createElement('canvas'); label.width = 128; label.height = 128;
     const context = label.getContext('2d');
     if (context) {
       context.fillStyle = '#365b60'; context.font = 'bold 64px sans-serif'; context.textAlign = 'center'; context.fillText('N', 64, 90);
       const north = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(label) }));
-      north.position.set(centre.x, span * .02, bounds.min.z - 300); north.scale.setScalar(span * .07); s.content.add(north);
+      north.position.set(centre.x, span * .02, minZ - 300); north.scale.setScalar(span * .07); s.content.add(north);
     }
-    const visibleRows = rows.filter((row) => measure(row, metric).denominator >= minimum);
-    const maximumCount = Math.max(1, ...visibleRows.map((row) => measure(row, metric).numerator));
-    const duplicates = new Map<string, number>();
-    const locationKey = (point: PhotoPoint) => point.coordinates.map((v) => v.toFixed(6)).join(':');
-    for (const point of points) duplicates.set(locationKey(point), (duplicates.get(locationKey(point)) ?? 0) + 1);
-    const items = mode === 'photos' ? points.map((point) => {
-      const position = project(point.coordinates);
-      if (spread && (duplicates.get(locationKey(point)) ?? 0) > 1) {
-        let hash = 0; for (const char of point.id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-        const angle = (hash % 3600) / 3600 * Math.PI * 2;
-        const radius = 3 + (hash % 500) / 100;
-        position.x += Math.cos(angle) * radius; position.z += Math.sin(angle) * radius;
-      }
-      return { key: point.id, position, height: Math.max(0, pointSignal(point, metric)), color: pointColour(point, metric), selected: point.id === selectedPhoto };
-    }) : visibleRows.map((row) => ({
-      key: row.key, position: project(row.coordinates[0]).add(project(row.coordinates[row.coordinates.length - 1])).multiplyScalar(.5),
-      height: heightMode === 'rate' ? measure(row, metric).rate ?? 0 : measure(row, metric).numerator / maximumCount,
-      color: colour(row, metric), selected: row.key === selected,
-    }));
-    const columns = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ roughness: .65 }), items.length);
-    const transform = new THREE.Object3D();
-    const maxHeight = span * .025 * heightScale;
+    const columns = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ roughness: .62 }), items.length);
+    const transform = new THREE.Object3D(), color = new THREE.Color();
+    const maxHeight = span * (mode === 'photos' ? .03 : .05) * scale;
+    const width = mode === 'photos' ? Math.max(2, Math.min(6, span / 1200)) : Math.max(8, Math.min(22, span / 200));
     items.forEach((item, i) => {
-      const height = Math.max(mode === 'photos' ? 2 : .5, item.height * maxHeight);
-      transform.position.set(item.position.x, height / 2, item.position.z);
-      const width = mode === 'photos' ? Math.max(2, Math.min(6, span / 1200)) : Math.max(9, Math.min(23, span / 200));
-      transform.scale.set(item.selected ? width * 2 : width, height, item.selected ? width * 2 : width);
+      const h = Math.max(mode === 'photos' ? 1.5 : .6, item.height * maxHeight);
+      transform.position.set(item.x, h / 2, item.z);
+      const w = item.selected ? width * 2.4 : width;
+      transform.scale.set(w, item.selected ? Math.max(h, maxHeight * .5) : h, w);
       transform.updateMatrix(); columns.setMatrixAt(i, transform.matrix);
-      columns.setColorAt(i, new THREE.Color(item.selected ? '#172d3b' : item.color));
+      columns.setColorAt(i, color.set(item.selected ? '#12222b' : item.color));
     });
     columns.instanceMatrix.needsUpdate = true;
     s.content.add(columns); s.columns = columns; s.keys = items.map((item) => item.key); s.mode = mode;
     s.reset = () => {
       s.controls.target.copy(centre);
-      s.camera.position.set(centre.x + span * .45, span * .85, centre.z + span * .95);
+      s.camera.position.set(centre.x + span * .45, span * .8, centre.z + span * .95);
       s.controls.update(); s.render();
     };
-    if (s.fitKey !== fitKey) { s.fitKey = fitKey; s.reset(); }
+    if (s.fitKey !== atlas.fitKey) { s.fitKey = atlas.fitKey; s.reset(); }
     s.render();
-  }, [rows, points, metric, selected, selectedPhoto, fitKey, heightScale, heightMode, minimum, mode, spread]);
+  }, [items, ds, sel, scale, mode, atlas.fitKey]);
+
+  const legendTally = useMemo(() => tally(ds, colorBy, sel, 'photos'), [ds, colorBy, sel]);
+  const heightInfo = HEIGHTS[mode].find((h) => h.key === heightMode)!;
   return <div className="viz-three-wrap">
     <div ref={host} className="viz-three" />
     {error ? <div className="viz-render-error" role="alert">{error}</div> : <>
-      <div className="viz-three-help"><strong>3D observation landscape</strong><span>Drag to orbit · Scroll to zoom · Right-drag to pan</span><span>{mode === 'photos' ? 'One column per tagged photo · Grid = 500 m' : 'Colour = percentage · Grid = 500 m'} · N marks north</span></div>
+      <div className="viz-three-help"><strong>3D observation landscape</strong><span>Drag to orbit · scroll to zoom · right-drag to pan · Home resets</span><span>{mode === 'photos' ? `${fmt(items.length)} photo columns, no sampling` : `${fmt(items.length)} segment columns`} · grid 500 m · N marks north</span></div>
       <div className="viz-three-controls">
-        <label>Render <select aria-label="3D data points" value={mode} onChange={(e) => { if (e.target.value === 'photos' || e.target.value === 'segments') setMode(e.target.value); }}><option value="photos">Every tagged photo</option><option value="segments">Segment summaries</option></select></label>
-        <label>Column height <input aria-label="Column height" type="range" min="0" max="2" step="0.1" value={heightScale} onChange={(e) => setHeightScale(Number(e.target.value))} /><output>{heightScale.toFixed(1)}×</output></label>
-        {mode === 'segments' && <><label>Height represents <select aria-label="Height represents" value={heightMode} onChange={(e) => { if (e.target.value === 'rate' || e.target.value === 'count') setHeightMode(e.target.value); }}><option value="rate">Percentage</option><option value="count">Photo count</option></select></label>
-        <label>Minimum observations <select aria-label="3D minimum observations" value={minimum} onChange={(e) => setMinimum(Number(e.target.value))}>{[1, 5, 10, 20].map((n) => <option key={n} value={n}>{n} photos</option>)}</select></label></>}
-        {mode === 'photos' ? <><label><input type="checkbox" checked={spread} onChange={(e) => setSpread(e.target.checked)} />Separate overlapping photos</label><small>{points.length.toLocaleString()} / {points.length.toLocaleString()} tagged photos rendered · no sampling or aggregation. Tall columns = recorded signal; low markers = other or unknown. {spread ? 'Coincident cameras spread up to 8 m for selection.' : 'Exact camera positions; some columns overlap.'}</small></> : <small>{rows.filter((row) => measure(row, metric).denominator >= minimum).length.toLocaleString()} of {rows.length.toLocaleString()} segments shown · {heightMode === 'rate' ? 'Tallest possible column = 100%' : `Tallest column = ${Math.max(0, ...rows.filter((row) => measure(row, metric).denominator >= minimum).map((row) => measure(row, metric).numerator))} photos`}. Heights are visual, not physical.</small>}
+        <div className="seg" role="group" aria-label="3D data points">{(['photos', 'segments'] as Mode[]).map((m) => <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}>{m === 'photos' ? 'Every photo' : 'Segments'}</button>)}</div>
+        <label>Height <select aria-label="Height represents" value={heightMode} onChange={(e) => setHeight(e.target.value as Height)}>{HEIGHTS[mode].map((h) => <option key={h.key} value={h.key}>{h.label}</option>)}</select></label>
+        {(heightMode === 'focus' || heightMode === 'share' || mode === 'photos') && <label>Highlight <select aria-label="3D highlight value" value={focus ?? ''} onChange={(e) => atlas.setFocus(e.target.value || null)}><option value="">None</option>{colorBy.categories.filter((c, k) => !c.structural && legendTally.counts[k]).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label>}
+        <label>Scale <input aria-label="Column height" type="range" min="0.2" max="3" step="0.1" value={scale} onChange={(e) => setScale(Number(e.target.value))} /><output>{scale.toFixed(1)}×</output></label>
+        {mode === 'photos' && <label className="viz-check"><input type="checkbox" checked={spread} onChange={(e) => setSpread(e.target.checked)} />Separate photos sharing a panorama</label>}
+        <small>{heightInfo.note}{(heightMode === 'focus' || heightMode === 'share') && focusIndex < 0 ? ' Choose a highlight value.' : ''} Heights are visual encodings, not terrain or obstacle heights.</small>
+        <button type="button" className="btn" onClick={() => state.current?.reset()}>Reset camera</button>
       </div>
-      <div className="viz-legend"><strong>{mode === 'photos' ? 'Individual photo observations' : 'Segment percentages'}</strong><div>{(mode === 'photos' ? pointLegend(metric) : [['#a7b2b8', 'Unknown'], ['#25857b', 'Low'], ['#e2bd61', 'Moderate'], ['#b94749', 'High']]).map(([color, label]) => <span key={label}><i style={{ background: color }} />{label}</span>)}</div><small>Click a column to inspect its source evidence. Camera locations are not surveyed feature positions.</small></div>
-      <button type="button" className="btn viz-reset" onClick={() => state.current?.reset()}>Reset camera</button>
+      <Legend title={`Colour: ${colorBy.label}`} categories={colorBy.categories} counts={legendTally.counts} selected={atlas.filters.cats[colorBy.id]}
+        onToggle={(key, only) => atlas.toggle(colorBy.id, key, only)} note={mode === 'segments' ? 'Segment colour = most common known value.' : 'Click a column to inspect its source photo.'} />
     </>}
   </div>;
 }

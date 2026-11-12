@@ -14,8 +14,9 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from geoalchemy2.shape import from_shape, to_shape
@@ -561,12 +562,41 @@ def ext_mark(req: MarkRequest, include_skipped: bool = False, backlog_only: bool
 # --------------------------------------------------------------------------
 
 
-@app.get("/assets/accessibility/{job_id}.json", include_in_schema=False)
-def accessibility_file(job_id: uuid.UUID):
-    path = settings.data_root / "accessibility" / f"{job_id}.json"
+@app.get("/assets/accessibility/{job_id}.meta.json", include_in_schema=False)
+def accessibility_meta(job_id: uuid.UUID):
+    path = settings.data_root / "accessibility" / f"{job_id}.meta.json"
     if not path.is_file():
         raise HTTPException(404, "Accessibility snapshot not published yet")
     return FileResponse(path, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/assets/accessibility/{job_id}.json", include_in_schema=False)
+def accessibility_file(job_id: uuid.UUID, request: Request):
+    path = settings.data_root / "accessibility" / f"{job_id}.json"
+    if not path.is_file():
+        raise HTTPException(404, "Accessibility snapshot not published yet")
+    headers = {"Cache-Control": "no-store", "Vary": "Accept-Encoding"}
+    packed = path.with_name(path.name + ".gz")
+    # The publisher writes the gzip twin straight after the JSON; only serve it when it is not older.
+    if "gzip" in request.headers.get("accept-encoding", "") and packed.is_file() and packed.stat().st_mtime >= path.stat().st_mtime:
+        return FileResponse(packed, media_type="application/json", headers=headers | {"Content-Encoding": "gzip"})
+    return FileResponse(path, media_type="application/json", headers=headers)
+
+
+@app.get("/api/jobs/{job_id}/thumbs", include_in_schema=False)
+def job_thumbs(job_id: uuid.UUID, ids: str = Query(..., max_length=4000), s: Session = Depends(get_db)):
+    """Thumbnail URLs for one page of atlas photos (at most 60), without loading full labels."""
+    try:
+        wanted = list(dict.fromkeys(uuid.UUID(v) for v in ids.split(",") if v))[:60]
+    except ValueError:
+        raise HTTPException(422, "ids must be UUIDs")
+    j = s.get(Job, job_id)
+    if not j:
+        raise HTTPException(404, "Job not found")
+    rows = s.execute(select(Shot.id, Shot.result["thumb"].astext, Shot.result["file"].astext, Shot.result["sha256"].astext)
+                     .where(Shot.job_id == job_id, Shot.id.in_(wanted))).all()
+    slug = quote(j.slug)
+    return {str(i): f"/files/{slug}/{quote(thumb or file, safe='/')}?v={sha or ''}" for i, thumb, file, sha in rows if thumb or file}
 
 
 @app.get("/files/{slug}/{rel:path}", include_in_schema=False)
