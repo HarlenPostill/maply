@@ -33,6 +33,8 @@ struct RouteSummaryView: View {
     var resultFocus: AccessibilityFocusState<Bool>.Binding
     let planAgain: () -> Void
     let retryCoverage: () -> Void
+    /// Off when the route is already drawn on a full-screen map behind the sheet.
+    var showsOverviewMap = true
     @State private var mapOpen = false
 
     private var groups: [WarningGroup] {
@@ -95,7 +97,8 @@ struct RouteSummaryView: View {
             }
             .accessibilityIdentifier("atAGlance")
 
-            section(TripCopy.overviewTitle) {
+            section(showsOverviewMap ? TripCopy.overviewTitle : TripCopy.mapKeyTitle) {
+                if showsOverviewMap {
                 // No tap target over the map: Apple's Legal link inside it must stay usable.
                 RouteOverviewMap(plan: plan, origin: origin, destination: destination)
                     .frame(height: 240)
@@ -110,6 +113,7 @@ struct RouteSummaryView: View {
                 .tint(olive)
                 .accessibilityHint("A map you can move and zoom, with the same key.")
                 .accessibilityIdentifier("openRouteMap")
+                }
                 RouteLegend(showsCrossings: plan.crossings + plan.sharedSurfaceTransitions > 0)
                 Text(TripCopy.mixedRule + " " + TripCopy.overviewOffset)
                     .font(.system(.caption, design: .rounded)).foregroundStyle(ink.opacity(0.8))

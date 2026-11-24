@@ -7,7 +7,7 @@
     "fingerprint": "ffffffffffff"
   },
   "snapshot": {
-    "graph_version": "r1-caae371ea420",
+    "graph_version": "r1-9cbb31d9e384",
     "content_sha256": "bda4d084f9d1",
     "designations_sha256": "fbcf06f2e51a",
     "loaded_at": "2026-11-05T10:00:00Z",
@@ -124,6 +124,8 @@
       "snap_max_m": 40.0,
       "side_ambiguous_m": 0.5,
       "excluded_bypass_m": 5.0,
+      "reach_max_m": 250.0,
+      "reach_penalty_m": 20.0,
       "evidence_reach_m": 10.0,
       "nearby_m": 25.0,
       "display_offset_m": 4.0,
@@ -188,6 +190,10 @@
     {
       "code": "connectors_inferred",
       "message": "Some links join streets that stop short of each other. They are inferred."
+    },
+    {
+      "code": "endpoint_extended_match",
+      "message": "An endpoint had no usable footpath beside it, so the nearest eligible footpath was used. The way to it may be long or cross streets, and is not assessed."
     }
   ],
   "snap_max_m": 40.0,

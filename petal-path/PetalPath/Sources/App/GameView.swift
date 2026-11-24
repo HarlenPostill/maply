@@ -9,7 +9,6 @@ let olive = Color(red: 0.42, green: 0.42, blue: 0.22)
 struct GameView: View {
     @StateObject private var state = GameState()
     @StateObject private var trip = TripPlanner.live()
-    @State private var tripDetent = PresentationDetent.large
     @State private var dragStart: (yaw: Float, pitch: Float)?
     @State private var zoomStart: Float?
 
@@ -73,6 +72,9 @@ struct GameView: View {
             }
             .opacity(state.settingsOpen || trip.isOpen ? 0 : 1)
             .animation(.easeOut(duration: 0.2), value: state.settingsOpen || trip.isOpen)
+
+            // Apple Maps-style trip planning: a full-screen map over the game, with its own sheet.
+            TripMapScreen(planner: trip, state: state)
         }
         .alert("Location is off", isPresented: $state.locationBlocked) {
             Button("Open Settings") {
@@ -86,12 +88,6 @@ struct GameView: View {
             SettingsView(state: state)
                 .presentationDetents([.fraction(0.56), .large])
                 .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.56)))
-                .presentationBackground(cream)
-                .presentationCornerRadius(26)
-        }
-        .sheet(isPresented: $trip.isOpen, onDismiss: { trip.close() }) {
-            TripSheet(planner: trip, state: state)
-                .presentationDetents([.medium, .large], selection: $tripDetent)
                 .presentationBackground(cream)
                 .presentationCornerRadius(26)
         }

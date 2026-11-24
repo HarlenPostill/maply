@@ -64,7 +64,7 @@ def walk(x):
     elif isinstance(x,list):
         for v in x: walk(v)
 walk(d)' "$regions" "$REGION" "$SERVICE")
-railway service scale --service "$SERVICE" "${scale_args[@]}" "$REGION=1" >/dev/null
+railway service scale --service "$SERVICE" ${scale_args[@]+"${scale_args[@]}"} "$REGION=1" >/dev/null
 
 # 4. Variables. The database URL goes over stdin, through the private network, with TLS.
 #    The variable references are resolved by Railway, so no address is copied here.

@@ -118,6 +118,44 @@ struct PlaceMap: View {
     }
 }
 
+/// The route's lines and numbered crossing markers, for any Apple map.
+struct RouteLines: MapContent {
+    var plan: RoutePlan
+
+    private var lines: [RouteLeg] { plan.legs.filter { $0.coordinates.count > 1 } }
+    private var junctions: [RouteLeg] {
+        plan.legs.filter { ($0.kind == .crossing || $0.kind == .sharedSurfaceTransition) && !$0.coordinates.isEmpty }
+    }
+
+    var body: some MapContent {
+        let numbers = plan.junctionNumbers
+        ForEach(lines) { l in
+            MapPolyline(coordinates: l.coordinates.map(\.clCoordinate))
+                .stroke(.white, style: StrokeStyle(lineWidth: LegStroke(l).width + 4, lineCap: .round, lineJoin: .round))
+        }
+        ForEach(lines) { l in
+            let s = LegStroke(l)
+            MapPolyline(coordinates: l.coordinates.map(\.clCoordinate))
+                .stroke(s.colour, style: StrokeStyle(lineWidth: s.width, lineCap: .round, lineJoin: .round, dash: s.dash))
+        }
+        ForEach(lines.filter { LegStroke($0).overlay != nil }) { l in
+            let o = LegStroke(l).overlay!
+            MapPolyline(coordinates: l.coordinates.map(\.clCoordinate))
+                .stroke(o.colour, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round, dash: o.dash))
+        }
+        ForEach(junctions) { l in
+            Annotation(TripCopy.legTitle(l, number: numbers[l.id]), coordinate: l.coordinates[0].clCoordinate) {
+                Text(numbers[l.id].map(String.init) ?? "!")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded)).monospacedDigit()
+                    .foregroundStyle(.white).frame(minWidth: 20, minHeight: 20)
+                    .background(crossingColour, in: Circle())
+                    .overlay(Circle().stroke(.white, lineWidth: 2))
+            }
+            .annotationTitles(.hidden)
+        }
+    }
+}
+
 /// The whole route on an Apple map. Small and still inside the sheet, or large and interactive in
 /// its own sheet. The written sections carry every fact it shows.
 struct RouteOverviewMap: View {
@@ -126,39 +164,10 @@ struct RouteOverviewMap: View {
     var destination: Place?
     var interactive = false
 
-    private var lines: [RouteLeg] { plan.legs.filter { $0.coordinates.count > 1 } }
-    private var junctions: [RouteLeg] {
-        plan.legs.filter { ($0.kind == .crossing || $0.kind == .sharedSurfaceTransition) && !$0.coordinates.isEmpty }
-    }
-
     var body: some View {
         let points = plan.legs.flatMap(\.coordinates) + [origin?.coordinate, destination?.coordinate].compactMap { $0 }
-        let numbers = plan.junctionNumbers
         Map(initialPosition: mapFraming(points), interactionModes: interactive ? .all : []) {
-            ForEach(lines) { l in
-                MapPolyline(coordinates: l.coordinates.map(\.clCoordinate))
-                    .stroke(.white, style: StrokeStyle(lineWidth: LegStroke(l).width + 4, lineCap: .round, lineJoin: .round))
-            }
-            ForEach(lines) { l in
-                let s = LegStroke(l)
-                MapPolyline(coordinates: l.coordinates.map(\.clCoordinate))
-                    .stroke(s.colour, style: StrokeStyle(lineWidth: s.width, lineCap: .round, lineJoin: .round, dash: s.dash))
-            }
-            ForEach(lines.filter { LegStroke($0).overlay != nil }) { l in
-                let o = LegStroke(l).overlay!
-                MapPolyline(coordinates: l.coordinates.map(\.clCoordinate))
-                    .stroke(o.colour, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round, dash: o.dash))
-            }
-            ForEach(junctions) { l in
-                Annotation(TripCopy.legTitle(l, number: numbers[l.id]), coordinate: l.coordinates[0].clCoordinate) {
-                    Text(numbers[l.id].map(String.init) ?? "!")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded)).monospacedDigit()
-                        .foregroundStyle(.white).frame(minWidth: 20, minHeight: 20)
-                        .background(crossingColour, in: Circle())
-                        .overlay(Circle().stroke(.white, lineWidth: 2))
-                }
-                .annotationTitles(.hidden)
-            }
+            RouteLines(plan: plan)
             if let origin {
                 Marker(origin.label, systemImage: "figure.roll", coordinate: origin.coordinate.clCoordinate).tint(olive)
             }

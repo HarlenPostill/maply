@@ -8,7 +8,7 @@
     "schema_version": "maply-accessibility/1",
     "fingerprint": "ffffffffffff"
   },
-  "graph_version": "r1-caae371ea420",
+  "graph_version": "r1-9cbb31d9e384",
   "policy_version": "manual_chair_v1",
   "as_of_date": "2026-11-05",
   "endpoints": {
@@ -25,7 +25,9 @@
       "street_name": "Main Street",
       "side": "left",
       "facing": "north",
-      "side_ambiguous": false
+      "side_ambiguous": false,
+      "matching": "nearest_side",
+      "crossed_streets": []
     },
     "destination": {
       "requested": [
@@ -40,7 +42,9 @@
       "street_name": "Side Street",
       "side": "right",
       "facing": "east",
-      "side_ambiguous": false
+      "side_ambiguous": false,
+      "matching": "nearest_side",
+      "crossed_streets": []
     }
   },
   "summary": {
@@ -226,6 +230,8 @@
       "which": "origin",
       "length_m": 16.0,
       "evidence": "not_assessed",
+      "matching": "nearest_side",
+      "crossed_streets": [],
       "geometry": {
         "type": "LineString",
         "coordinates": [
@@ -358,6 +364,8 @@
       "which": "destination",
       "length_m": 2.0,
       "evidence": "not_assessed",
+      "matching": "nearest_side",
+      "crossed_streets": [],
       "geometry": {
         "type": "LineString",
         "coordinates": [

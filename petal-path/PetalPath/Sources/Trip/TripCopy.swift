@@ -188,6 +188,7 @@ enum TripCopy {
         case "driveway_lip_or_channel": "Driveway lip or channel in a survey photo"
         case "endpoint_side_ambiguous": "Not clear which side of the street"
         case "endpoint_gap_not_assessed": "Gap to the footpath not assessed"
+        case "endpoint_extended_match": "Nearest usable footpath is further away"
         case "hazard_observed": "Hazard in a survey photo"
         case "surface_concern": "Surface concern in a survey photo"
         case "driveway_dips": "Driveway dips across the footpath"
@@ -345,6 +346,7 @@ enum TripCopy {
     static let turnOnLocation = "Use my location"
     static let changeDestination = "Change destination"
     static let changeStart = "Change start"
+    static let mapKeyTitle = "Map key"
     static let tryAgain = "Try again"
     static let showMore = "More"
     static let showLess = "Less"
@@ -372,6 +374,7 @@ enum TripCopy {
         case "no_footway_network": "Park, plaza and laneway paths, service roads and steps aren't mapped."
         case "no_grade_separation": "Bridges and tunnels aren't known, so streets that cross on the map are treated as meeting."
         case "approximate_boundary": "The edge of the surveyed area is approximate."
+        case "endpoint_extended_match": "An end had no usable footpath right beside it, so the nearest one was used. The way to it isn't assessed and may cross a street."
         default: "A further data limit applies that this version can't describe."
         }
     }

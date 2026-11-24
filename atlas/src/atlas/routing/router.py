@@ -8,7 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from atlas.routing.evidence import SLOPE_CATEGORIES
-from atlas.routing.geo import XY, dist, gap_blocked, locate, offset, substring
+from atlas.routing.geo import XY, dist, gap_blocked, locate, offset, segments_cross, substring
 from atlas.routing.graph import Element, Graph
 from atlas.routing.policy import API_VERSION, LIMITS
 
@@ -41,6 +41,9 @@ class Candidate:
     side: str | None = None
     facing: str | None = None
     centre_m: float = 0.0            # distance from the point to the street centreline (or node)
+    extended: bool = False           # found by extended matching, not the strict nearest-side match
+    crossed_streets: list[str] = field(default_factory=list)   # streets the straight gap crosses
+    extra_cost: float = 0.0          # route-choice cost on top of gap_weight * gap_m
 
 
 @dataclass
@@ -132,6 +135,55 @@ class Router:
                                  piece['street_name'], None, None, dist(p, q)))
         return out
 
+    def extended_candidates(self, which: str, lng: float, lat: float) -> list[Candidate]:
+        """The nearest eligible footpath sides within reach_max_m, on either side of any street.
+
+        Used only when strict matching finds nothing, or nothing connected. The straight gap may cross
+        streets; each crossed street is named and costs a crossing, and the gap is never assessed.
+        """
+        g, policy = self.g, self.policy
+        p = g.proj.xy(lng, lat)
+        best: dict[int, Candidate] = {}
+        seen = set()
+        for _, _, edge_id in g.piece_grid.near(p, policy.reach_max_m):
+            if edge_id in seen:
+                continue
+            seen.add(edge_id)
+            piece = g.pieces[edge_id]
+            loc = locate(piece['line'], piece['cum'], p)
+            if loc.distance > policy.reach_max_m:
+                continue
+            for side in ('left', 'right'):
+                el = piece['elements'][side]
+                if el.excluded:
+                    continue
+                total = el.cum[-1]
+                shown = offset(substring(el.line, el.cum, max(loc.along - 0.5, 0), min(loc.along + 0.5, total)),
+                               policy.display_offset_m if side == 'left' else -policy.display_offset_m)
+                matched = ((shown[0][0] + shown[-1][0]) / 2, (shown[0][1] + shown[-1][1]) / 2)
+                gap = dist(p, matched)
+                if gap > policy.reach_max_m:
+                    continue
+                crossed = self._streets_crossed(p, matched)
+                cost = policy.gap_weight * gap + policy.crossing_penalty_m * len(crossed) + policy.reach_penalty_m
+                c = Candidate(which, el, None, loc.along * el.scale, gap, matched, p, False, el.street_name, side,
+                              el.facing, loc.distance, extended=True, crossed_streets=crossed, extra_cost=cost - policy.gap_weight * gap)
+                if el.index not in best or cost < best[el.index].extra_cost + policy.gap_weight * best[el.index].gap_m:
+                    best[el.index] = c
+        ranked = sorted(best.values(), key=lambda c: (c.extra_cost + policy.gap_weight * c.gap_m, c.element.index))
+        main = g.main_component
+        in_main = [c for c in ranked if g.component_eligible[c.element.u] == main]
+        out = ranked[:8]
+        out += [c for c in in_main[:4] if all(c is not o for o in out)]
+        return out
+
+    def _streets_crossed(self, p: XY, q: XY) -> list[str]:
+        names: dict[int, str] = {}
+        for a, b, edge_id in self.g.piece_grid.along(p, q):
+            if edge_id not in names and segments_cross(p, q, a, b):
+                names[edge_id] = self.g.pieces[edge_id]['street_name'] or 'an unnamed street'
+        return sorted(set(names.values()))
+
     def _gap_crosses_street(self, p: XY, q: XY, own_edge: int) -> bool:
         return gap_blocked(p, q, ((a, b) for a, b, edge_id in self.g.piece_grid.along(p, q) if edge_id != own_edge))
 
@@ -144,14 +196,53 @@ class Router:
         if dist(po, pd) < 5.0:
             raise RouteError(422, 'same_location', 'The origin and destination are the same place.',
                              {'distance_m': round(dist(po, pd), 1)})
-        origins = self.candidates('origin', *origin)
-        destinations = self.candidates('destination', *destination)
+        strict_o = strict_d = None
+        errors = []
+        try:
+            strict_o = self.candidates('origin', *origin)
+        except RouteError as e:
+            errors.append(e)
+        try:
+            strict_d = self.candidates('destination', *destination)
+        except RouteError as e:
+            errors.append(e)
+        for e in errors:
+            if e.code == 'outside_coverage':
+                raise e
+        if not errors:
+            try:
+                return self._search(strict_o, strict_d, start, cancel)
+            except RouteError as e:
+                if e.code != 'no_route':
+                    raise
+                errors.append(e)
+        if policy.reach_max_m <= 0:            # extended matching turned off
+            raise errors[0]
+        # Extended matching: keep any strict candidates, add the nearest eligible footpath within reach.
+        ext_o = self.extended_candidates('origin', *origin)
+        ext_d = self.extended_candidates('destination', *destination)
+        if not ext_o or not ext_d:
+            which = 'origin' if not ext_o else 'destination'
+            first = next((e for e in errors if e.details.get('which') == which), None)
+            if first is not None and first.code in ('too_far_from_network', 'no_eligible_footpath_nearby'):
+                first.details['max_m'] = float(policy.reach_max_m)
+                first.message = (f'No usable footpath within {policy.reach_max_m:g} m of the {which}.'
+                                 if first.code == 'too_far_from_network' else
+                                 f'Every footpath within {policy.reach_max_m:g} m of the {which} is excluded.')
+                raise first
+            raise errors[0]
+        try:
+            return self._search((strict_o or []) + ext_o, (strict_d or []) + ext_d, start, cancel)
+        except RouteError:
+            raise                  # an extended match that is still not connected says so: no_route
 
+    def _search(self, origins: list[Candidate], destinations: list[Candidate], start: float, cancel) -> dict:
+        g, policy = self.g, self.policy
         S, T = -1, -2
         out_links: dict[int, list] = defaultdict(list)   # node -> [(target, cost, step)]
         start_links = []
         for c in origins:
-            w = policy.gap_weight * c.gap_m
+            w = policy.gap_weight * c.gap_m + c.extra_cost
             if c.element is None:
                 start_links.append((c.corner, w, None, c))
             else:
@@ -159,7 +250,7 @@ class Router:
                 start_links.append((el.u, w + el.cost_between(policy, c.along, 0), Step(el, c.along, 0), c))
                 start_links.append((el.v, w + el.cost_between(policy, c.along, el.length_m), Step(el, c.along, el.length_m), c))
         for c in destinations:
-            w = policy.gap_weight * c.gap_m
+            w = policy.gap_weight * c.gap_m + c.extra_cost
             if c.element is None:
                 out_links[c.corner].append((T, w, None, c))
             else:
@@ -170,7 +261,8 @@ class Router:
             for cd in destinations:
                 if co.element is not None and co.element is cd.element:
                     el = co.element
-                    cost = policy.gap_weight * (co.gap_m + cd.gap_m) + el.cost_between(policy, co.along, cd.along)
+                    cost = (policy.gap_weight * (co.gap_m + cd.gap_m) + co.extra_cost + cd.extra_cost
+                            + el.cost_between(policy, co.along, cd.along))
                     start_links.append((T, cost, Step(el, co.along, cd.along), co, cd))
 
         best = {S: 0.0}
@@ -283,10 +375,18 @@ class Router:
 
         def add_gap(c: Candidate):
             legs.append({'index': len(legs), 'kind': 'endpoint_gap', 'which': c.which, 'length_m': _r(c.gap_m),
-                         'evidence': 'not_assessed',
+                         'evidence': 'not_assessed', 'matching': 'extended' if c.extended else 'nearest_side',
+                         'crossed_streets': list(c.crossed_streets),
                          'geometry': {'type': 'LineString', 'coordinates': [lnglat(c.requested), lnglat(c.matched)]}})
-            warn('endpoint_gap_not_assessed', 'info', legs[-1]['index'], lnglat(c.requested), None,
-                 f'The {c.gap_m:.0f} m between the {c.which} and the footpath is not assessed.')
+            if c.extended:
+                crossing = (f', crossing {" and ".join(c.crossed_streets)},' if c.crossed_streets else '')
+                warn('endpoint_extended_match', 'prominent', legs[-1]['index'], lnglat(c.requested), None,
+                     f'No usable footpath was found right beside the {c.which}, so the route starts from the nearest '
+                     f'one, {c.gap_m:.0f} m away{crossing} on {c.street_name or "an unnamed street"}. '
+                     f'The way there is not assessed.')
+            else:
+                warn('endpoint_gap_not_assessed', 'info', legs[-1]['index'], lnglat(c.requested), None,
+                     f'The {c.gap_m:.0f} m between the {c.which} and the footpath is not assessed.')
             if c.side_ambiguous:
                 warn('endpoint_side_ambiguous', 'prominent', legs[-1]['index'], lnglat(c.requested), None,
                      f'The {c.which} is on the street centreline; which side of the street was assumed.')
@@ -400,6 +500,8 @@ class Router:
                   'width_not_measured', 'slope_categorical_only', 'imagery_age', 'endpoint_gap_not_assessed']
         if connectors:
             limits.append('connectors_inferred')
+        if oc.extended or dc.extended:
+            limits.append('endpoint_extended_match')
         if not g.designator.available:
             limits.append('designation_unavailable')
         s = g.snapshot
@@ -413,7 +515,9 @@ class Router:
             'as_of_date': g.as_of.isoformat(),
             'endpoints': {c.which: {'requested': lnglat(c.requested), 'matched': lnglat(c.matched), 'gap_m': _r(c.gap_m),
                                     'street_name': c.street_name, 'side': c.side, 'facing': c.facing,
-                                    'side_ambiguous': c.side_ambiguous} for c in (oc, dc)},
+                                    'side_ambiguous': c.side_ambiguous,
+                                    'matching': 'extended' if c.extended else 'nearest_side',
+                                    'crossed_streets': list(c.crossed_streets)} for c in (oc, dc)},
             'summary': {
                 'route_m': _r(street_m + connector_m), 'street_m': _r(street_m), 'connector_m': _r(connector_m),
                 'endpoint_gap_m': _r(oc.gap_m + dc.gap_m),

@@ -37,6 +37,9 @@ def crossings(route) -> list[dict]:
     return [leg for leg in route['legs'] if leg['kind'] == 'crossing']
 
 
+STRICT = Policy(reach_max_m=0)      # strict nearest-side matching only, no extended fallback
+
+
 def fail(r: Router, a, b) -> RouteError:
     with pytest.raises(RouteError) as info:
         go(r, a, b)
@@ -116,7 +119,7 @@ def test_reaching_the_far_side_of_a_side_street_crosses_it():
 # --- disconnected -------------------------------------------------------------
 
 def test_disconnected_component_is_no_route():
-    err = fail(router(), (50, 306), (50, 6))
+    err = fail(router(policy=STRICT), (50, 306), (50, 6))
     assert (err.status, err.code, err.details) == (404, 'no_route', {
         'reason': 'disconnected', 'origin_in_main_network': False, 'destination_in_main_network': True})
 
@@ -131,14 +134,30 @@ def test_known_missing_footpath_is_excluded_even_in_previews():
     lefts = [leg for leg in route['legs'] if leg['kind'] == 'footpath_side' and leg['side'] == 'left']
     assert all(leg['length_m'] < 100 for leg in lefts)       # never walks the north side of M-J
     assert route['summary']['crossings']['count'] == 2
-    err = fail(r, (130, 6), (170, 6))
+    err = fail(router(town, STRICT), (130, 6), (170, 6))
     assert err.code == 'no_eligible_footpath_nearby' and err.details['excluded_nearby'] is True
+    # By default the far side is used instead, labelled, and the excluded side is still never walked.
+    route = go(r, (130, 6), (170, 6))
+    assert footpaths(route) == [('Main Street', 'right')]
+    assert route['endpoints']['origin']['matching'] == 'extended'
+    assert route['endpoints']['origin']['crossed_streets'] == ['Main Street']
+    w = next(w for w in route['warnings'] if w['code'] == 'endpoint_extended_match')
+    assert w['severity'] == 'prominent' and 'Main Street' in w['message']
+    assert 'endpoint_extended_match' in route['limits']
 
 
 def test_blocked_by_exclusions_when_no_way_around():
     town = Town().observe('main2', 'left', 55, footpath=ABSENT).observe('main2', 'right', 55, footpath=ABSENT)
-    err = fail(router(town), (50, 6), (250, 6))
+    err = fail(router(town, STRICT), (50, 6), (250, 6))
     assert (err.code, err.details['reason']) == ('no_route', 'blocked_by_exclusions')
+    # Extended matching may reach around the block, but never along the excluded piece.
+    try:
+        route = go(router(town), (50, 6), (250, 6))
+    except RouteError as e:
+        assert e.code == 'no_route'
+    else:
+        assert not any(leg['kind'] == 'footpath_side' and leg['street_name'] == 'Main Street'
+                       and all(100 < x < 200 for x in xs(leg)) for leg in route['legs'])
 
 
 def test_flagged_absence_is_uncertain_not_excluded():
@@ -160,12 +179,14 @@ def hazard(persistence=None, blocking=True, **extra):
 
 def test_fixed_barrier_excluded():
     town = Town().observe('main2', 'left', 55, features=hazard('fixed'))
-    assert fail(router(town), (130, 6), (170, 6)).code == 'no_eligible_footpath_nearby'
+    assert fail(router(town, STRICT), (130, 6), (170, 6)).code == 'no_eligible_footpath_nearby'
+    assert footpaths(go(router(town), (130, 6), (170, 6))) == [('Main Street', 'right')]
 
 
 def test_steps_are_a_fixed_barrier_but_a_partial_fixed_hazard_is_only_a_warning():
     steps = Town().observe('main2', 'left', 55, features=[('footpath_section', {'presence': 'present', 'interruption': 'steps'})])
-    assert fail(router(steps), (130, 6), (170, 6)).code == 'no_eligible_footpath_nearby'
+    assert fail(router(steps, STRICT), (130, 6), (170, 6)).code == 'no_eligible_footpath_nearby'
+    assert footpaths(go(router(steps), (130, 6), (170, 6))) == [('Main Street', 'right')]
     partial = Town().observe('main2', 'left', 55, features=hazard('fixed', blocking=False))
     route = go(router(partial), (130, 6), (170, 6))
     assert any(w['code'] == 'hazard_observed' for w in route['warnings'])
@@ -197,12 +218,12 @@ def test_flagged_fixed_barriers_and_steps_still_exclude_and_keep_the_recheck_rea
     for features in (hazard('fixed'), [('footpath_section', {'presence': 'present', 'interruption': 'steps'})],
                      [('driveway', {'entry_join': 'step', 'surface': 'concrete'})]):
         town = Town().observe('main2', 'left', 55, features=features, flagged=True)
-        r = router(town)
+        r = router(town, STRICT)
         err = fail(r, (130, 6), (170, 6))
         assert err.code == 'no_eligible_footpath_nearby' and err.details['excluded_reasons'] == ['fixed_barrier_flagged']
         assert r.g.pieces[2]['elements']['left'].excluded == ['fixed_barrier_flagged']
         assert r.g.stats['excluded_footpath_side_m'] == {'fixed_barrier_flagged': 100.0}
-    unflagged = router(Town().observe('main2', 'left', 55, features=hazard('fixed')))
+    unflagged = router(Town().observe('main2', 'left', 55, features=hazard('fixed')), STRICT)
     assert fail(unflagged, (130, 6), (170, 6)).details['excluded_reasons'] == ['fixed_barrier']
 
 
@@ -211,7 +232,7 @@ def test_a_blocking_step_is_excluded_whatever_its_persistence_tag():
         facts = classify('present', False, hazard(persistence, type='step'))
         assert facts.fixed_barriers == ['hazard_step'] and facts.blocking_permanence_unknown == []
         town = Town().observe('main2', 'left', 55, features=hazard(persistence, type='step'))
-        assert fail(router(town), (130, 6), (170, 6)).code == 'no_eligible_footpath_nearby'
+        assert fail(router(town, STRICT), (130, 6), (170, 6)).code == 'no_eligible_footpath_nearby'
 
 
 def test_steps_reported_at_a_crossing_exclude_every_crossing_at_that_junction():
@@ -256,9 +277,12 @@ def test_per_way_pedestrian_designation_allows_missing_footpath():
 
 def test_without_trustworthy_designation_the_merged_highway_grants_nothing():
     for doc in (None, {**designations(), 'ways': [w for w in designations()['ways'] if w['name'] != 'Mall']}):
-        r = router(mall_without_footpath(), doc=doc)
+        r = router(mall_without_footpath(), STRICT, doc=doc)
         assert r.g.pieces[7]['designation'] == 'ambiguous'
         assert fail(r, (206, 150), (206, 190)).code == 'no_eligible_footpath_nearby'
+        # By default the other side of the Mall is used, and the excluded side is never walked.
+        route = go(router(mall_without_footpath(), doc=doc), (206, 150), (206, 190))
+        assert ('Mall', 'right') not in footpaths(route)
 
 
 def test_partial_designation_coverage_is_ambiguous():
@@ -281,8 +305,10 @@ def test_endpoint_gap_is_reported_and_never_part_of_the_route():
 
 
 def test_too_far_and_outside_coverage():
-    err = fail(router(), (130, 50), (170, 6))
+    err = fail(router(policy=STRICT), (130, 50), (170, 6))
     assert (err.code, err.details['which'], err.details['max_m']) == ('too_far_from_network', 'origin', 40.0)
+    err = fail(router(policy=Policy(reach_max_m=30)), (130, 50), (170, 6))
+    assert (err.code, err.details['which'], err.details['max_m']) == ('too_far_from_network', 'origin', 30)
     err = fail(router(), (130, 6), (500, 0))
     assert (err.code, err.details) == ('outside_coverage', {'which': 'destination'})
 
@@ -290,7 +316,7 @@ def test_too_far_and_outside_coverage():
 def test_matching_never_jumps_across_a_street():
     # The north side of M-J is excluded; Lower Lane is 38 m away but across Main Street.
     town = Town().observe('main2', 'left', 50, footpath=ABSENT)
-    err = fail(router(town), (150, 8), (170, 6))
+    err = fail(router(town, STRICT), (150, 8), (170, 6))
     assert err.code == 'no_eligible_footpath_nearby'
     # From the south side, Main Street's south footpath is nearer than Lower Lane.
     route = go(router(), (150, -10), (170, -6))
@@ -378,3 +404,39 @@ def test_graph_stats_describe_the_model():
     assert g.stats['crossings'] > 0 and g.stats['designation']['available'] is True
     assert g.stats['designation']['matched_share'] == pytest.approx(1.0, abs=0.02)
     assert g.stats['designation']['designated_pedestrian_m'] == pytest.approx(100, abs=0.5)
+
+
+def xs(leg) -> list[float]:
+    from routing_town import ORIGIN
+    import math
+    return [(c[0] - ORIGIN[0]) * 111_195.08 * math.cos(math.radians(-33.90 + 0.0015)) for c in leg['geometry']['coordinates']]
+
+
+# --- extended matching ------------------------------------------------------------
+
+def test_strict_matches_are_unchanged_by_extended_matching():
+    for a, b in (((130, 6), (170, 6)), ((150, 6), (206, 50)), ((130, 30), (170, 6))):
+        default, strict = go(router(), a, b), go(router(policy=STRICT), a, b)
+        default.pop('graph_version'), strict.pop('graph_version')      # the policy parameters differ
+        assert default == strict
+
+
+def test_a_point_in_the_middle_of_a_block_reaches_the_nearest_footpath():
+    route = go(router(), (130, 50), (170, 6))
+    o = route['endpoints']['origin']
+    assert o['matching'] == 'extended' and o['gap_m'] > 40
+    assert route['legs'][0]['matching'] == 'extended' and route['legs'][0]['evidence'] == 'not_assessed'
+    assert any(w['code'] == 'endpoint_extended_match' and w['severity'] == 'prominent' for w in route['warnings'])
+    assert route['summary']['route_m'] > 0
+
+
+def test_an_island_origin_reaches_the_main_network():
+    route = go(router(), (50, 306), (50, 6))
+    assert route['endpoints']['origin']['matching'] == 'extended'
+    assert route['endpoints']['destination']['matching'] == 'nearest_side'
+
+
+def test_extended_matching_never_walks_an_excluded_footpath():
+    town = Town().observe('main2', 'left', 50, footpath=ABSENT)
+    route = go(router(town), (150, 8), (170, 6))
+    assert ('Main Street', 'left') not in footpaths(route)

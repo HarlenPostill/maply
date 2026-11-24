@@ -46,7 +46,7 @@ def test_conflicting_way_classes_on_the_same_geometry_are_ambiguous(copy_first):
     assert (piece['designation'], piece['designation_basis']) == ('ambiguous', 'conflicting_ways')
     assert piece['osm_way_ids'] == [MALL_WAY, 999]
     with pytest.raises(RouteError) as info:
-        Router(g).route(lnglat(206, 150), lnglat(206, 190))
+        Router(build(mall_without_footpath(), doc, Policy(reach_max_m=0))).route(lnglat(206, 150), lnglat(206, 190))
     assert info.value.code == 'no_eligible_footpath_nearby'
     assert info.value.details['excluded_reasons'] == ['footpath_absent']
 

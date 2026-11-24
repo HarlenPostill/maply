@@ -13,10 +13,10 @@
     "api_version": "maply-route-preview/1",
     "error": {
       "code": "too_far_from_network",
-      "message": "No surveyed street within 40 m of the origin.",
+      "message": "No usable footpath within 30 m of the origin.",
       "details": {
         "which": "origin",
-        "max_m": 40.0
+        "max_m": 30.0
       }
     }
   },
@@ -48,7 +48,7 @@
       "code": "snapshot_changed",
       "message": "The atlas changed since the client last read it.",
       "details": {
-        "graph_version": "r1-caae371ea420"
+        "graph_version": "r1-9cbb31d9e384"
       }
     }
   },

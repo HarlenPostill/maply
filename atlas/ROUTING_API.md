@@ -97,7 +97,7 @@ Response `200` ([`route-preview.json`](docs/routing-examples/route-preview.json)
 | Field | Meaning |
 | --- | --- |
 | `status`, `navigation_allowed` | Always `"unverified_preview"` and `false`. |
-| `endpoints.origin` / `endpoints.destination` | `requested`, `matched`, `gap_m`, `street_name`, `side` (`left`/`right` of the line direction, or `null` when matched to a junction), `facing` (compass side), `side_ambiguous`. |
+| `endpoints.origin` / `endpoints.destination` | `requested`, `matched`, `gap_m`, `street_name`, `side` (`left`/`right` of the line direction, or `null` when matched to a junction), `facing` (compass side), `side_ambiguous`, `matching` (`nearest_side` or `extended`), `crossed_streets`. |
 | `summary.route_m` | `street_m + connector_m`. It excludes endpoint gaps and crossings, whose lengths are not measured. |
 | `summary.endpoint_gap_m` | Both endpoint gaps. Never part of the route and never assessed. |
 | `summary.evidence_m` | `observed_m`, `uncertain_m` and `unknown_m`. These **partition `street_m`**. |
@@ -122,13 +122,13 @@ Legs:
 | `crossing` | `crossed_street`, `at`, `length_m: null`, `evidence: "unverified"`, Point. `nearby_observations` counts camera observations within 25 m of the junction that mention a kerb ramp (present, absent, raised lip or step) or a crossing (unmodified kerb, steps, level or ramp). Those counts are context only. A camera position cannot place a ramp at a particular kerb, so they never verify the crossing. |
 | `shared_surface_transition` | Moving across a designated pedestrian street or shared zone at a junction. Same fields as a crossing. |
 | `connector` | `length_m`, `evidence: "inferred"`, LineString. |
-| `endpoint_gap` | `which`, `length_m`, `evidence: "not_assessed"`. The straight line from the requested point to the match. It never claims that this ground is passable. |
+| `endpoint_gap` | `which`, `length_m`, `evidence: "not_assessed"`, `matching`, `crossed_streets`. The straight line from the requested point to the match. It never claims that this ground is passable. |
 
 Warning codes:
 
 | Severity | Codes |
 | --- | --- |
-| `prominent` | `crossing_unverified`, `shared_surface_transition_unverified`, `connector_inferred`, `footpath_unknown`, `steep_slope_observed`, `temporary_obstruction_observed`, `flagged_observation` (when the flagged photo showed a missing footpath or an unrecorded-permanence blockage), `blocking_permanence_unknown`, `narrowed_passage`, `footpath_interrupted`, `missing_surface_observed`, `driveway_lip_or_channel`, `endpoint_side_ambiguous` |
+| `prominent` | `crossing_unverified`, `shared_surface_transition_unverified`, `connector_inferred`, `endpoint_extended_match`, `footpath_unknown`, `steep_slope_observed`, `temporary_obstruction_observed`, `flagged_observation` (when the flagged photo showed a missing footpath or an unrecorded-permanence blockage), `blocking_permanence_unknown`, `narrowed_passage`, `footpath_interrupted`, `missing_surface_observed`, `driveway_lip_or_channel`, `endpoint_side_ambiguous` |
 | `info` | `endpoint_gap_not_assessed`, `flagged_observation` (otherwise), `hazard_observed`, `surface_concern`, `driveway_dips`, `driveway_tilts_sideways`, `driveway_interrupted`, `no_separate_footpath` |
 
 ### Evidence lengths
@@ -173,7 +173,7 @@ tag, and none says `steep`.
 | 413 | `payload_too_large` | `{"max_bytes": 4096}` |
 | 415 | `unsupported_media_type` | |
 | 422 | `outside_coverage` | `{"which": "origin" \| "destination"}` |
-| 422 | `too_far_from_network` | `{"which", "max_m": 40}` |
+| 422 | `too_far_from_network` | `{"which", "max_m"}`: 250 once extended matching has also failed, 40 with it off |
 | 422 | `no_eligible_footpath_nearby` | `{"which", "max_m", "excluded_nearby", "excluded_reasons"}`. The reasons are `fixed_barrier`, `fixed_barrier_flagged`, `footpath_absent` and `footpath_ends`. |
 | 422 | `same_location` | `{"distance_m"}` (under 5 m apart) |
 | 404 | `no_route` | `{"reason": "disconnected" \| "blocked_by_exclusions", "origin_in_main_network", "destination_in_main_network"}` |
@@ -215,6 +215,16 @@ If the client disconnects, the search is cancelled and the server answers 499 to
   - A point beyond a street end is matched to the junction corner whose angle contains it (both
     corners at a dead end).
   - Up to 8 candidates are tried. The gap counts three times its length in route choice.
+  - **Extended matching (fallback).** If strict matching finds nothing at either end, or the strict
+    candidates aren't connected (`no_route`), the service tries again with the nearest eligible
+    footpath sides within `reach_max_m` (250 m) of each end. These may be on the far side of the
+    street or across other streets, and may lie past an excluded footpath. The route itself still never
+    uses an excluded footpath. Each crossed street costs a crossing (30 m) in route choice, and any
+    extended match costs another 20 m, so strict matches win whenever they work. Routes that strict
+    matching already finds are unchanged. An extended endpoint has `matching: "extended"` and names
+    the streets its straight gap crosses in `crossed_streets`, both on the endpoint and on its
+    `endpoint_gap` leg. It gets a prominent `endpoint_extended_match` warning and adds the
+    `endpoint_extended_match` limit. `Policy(reach_max_m=0)` turns the fallback off.
 - **Costs.** Footpath metres. Uncertain stretches ×1.3 and unknown ×1.5, so observed footpath is
   preferred. 30 m-equivalent per crossing, 10 m per shared-surface transition, connectors ×1.5.
   Slope and imagery age never change cost.

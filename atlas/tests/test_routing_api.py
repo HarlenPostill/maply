@@ -74,8 +74,9 @@ def test_routing_errors_are_typed(client):
     r = client.post('/v1/route-preview', json=body(destination=(500, 0)))
     assert r.status_code == 422 and r.json()['error'] == {
         'code': 'outside_coverage', 'message': 'The destination is outside the surveyed area.', 'details': {'which': 'destination'}}
-    assert code(client.post('/v1/route-preview', json=body(origin=(130, 50)))) == 'too_far_from_network'
-    r = client.post('/v1/route-preview', json=body(origin=(50, 306)))
+    r = client.post('/v1/route-preview', json=body(origin=(130, 50)))       # mid-block: extended match
+    assert r.status_code == 200 and r.json()['endpoints']['origin']['matching'] == 'extended'
+    r = client.post('/v1/route-preview', json=body(origin=(-50, 350)))       # only Island Lane is in reach
     assert r.status_code == 404 and r.json()['error']['details']['reason'] == 'disconnected'
     assert code(client.post('/v1/route-preview', json=body(destination=(131, 6)))) == 'same_location'
 

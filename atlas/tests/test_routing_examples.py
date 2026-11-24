@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from atlas.routing.api import create_app
+from atlas.routing.policy import Policy
 from atlas.routing.service import Service
 from routing_town import AS_OF, Town, designations, ll
 
@@ -37,6 +38,13 @@ def example_town() -> Town:
     return town
 
 
+def too_far() -> dict:
+    # The test town is too small for a point 250 m from every street, so this uses a shorter reach.
+    svc = Service(lambda: example_town().snapshot(), designations(), policy=Policy(reach_max_m=30), today=lambda: AS_OF)
+    svc.refresh()
+    return TestClient(create_app(svc)).post('/v1/route-preview', json={'origin': ll(130, 50), 'destination': ll(206, 60)}).json()
+
+
 def generated() -> dict[str, object]:
     svc = Service(lambda: example_town().snapshot(), designations(), today=lambda: AS_OF)
     svc.refresh()
@@ -46,8 +54,8 @@ def generated() -> dict[str, object]:
     post = lambda b: client.post('/v1/route-preview', json=b).json()
     errors = {
         'outside_coverage': post({'origin': ll(130, 20), 'destination': ll(500, 0)}),
-        'too_far_from_network': post({'origin': ll(130, 50), 'destination': ll(206, 60)}),
-        'no_route_disconnected': post({'origin': ll(50, 306), 'destination': ll(206, 60)}),
+        'too_far_from_network': too_far(),
+        'no_route_disconnected': post({'origin': ll(-50, 350), 'destination': ll(206, 60)}),
         'same_location': post({'origin': ll(130, 20), 'destination': ll(131, 20)}),
         'snapshot_changed': post({**request, 'expected_graph_version': 'r1-000000000000'}),
         'invalid_request': post({'origin': ll(130, 20)}),

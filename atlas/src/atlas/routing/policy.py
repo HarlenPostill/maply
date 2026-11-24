@@ -18,6 +18,10 @@ class Policy:
     snap_max_m: float = 40.0
     side_ambiguous_m: float = 0.5
     excluded_bypass_m: float = 5.0   # an excluded footpath beside the point blocks matches farther than this beyond it
+    # Extended matching, used only when the strict match above finds nothing or no route: the nearest
+    # eligible footpath within reach_max_m, on either side and across streets, with prominent warnings.
+    reach_max_m: float = 250.0
+    reach_penalty_m: float = 20.0    # route-choice cost of using an extended match at all
     evidence_reach_m: float = 10.0
     nearby_m: float = 25.0
     display_offset_m: float = 4.0
@@ -77,4 +81,6 @@ LIMITS: dict[str, str] = {
     'designation_unavailable': 'Per-way street designations are not loaded; no street gets the pedestrian or '
                                'shared-zone allowance.',
     'connectors_inferred': 'Some links join streets that stop short of each other. They are inferred.',
+    'endpoint_extended_match': 'An endpoint had no usable footpath beside it, so the nearest eligible footpath was '
+                               'used. The way to it may be long or cross streets, and is not assessed.',
 }

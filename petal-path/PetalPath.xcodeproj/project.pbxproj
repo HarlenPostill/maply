@@ -31,7 +31,6 @@
 		8B64B91432B2BE3BF35A55DB /* SimulatorRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01160256FD86D793BD563A3D /* SimulatorRenderer.swift */; };
 		8C76FD65350078F47A48A012 /* T_Shoes_Terracotta.png in Resources */ = {isa = PBXBuildFile; fileRef = F65C3DC340BB1B56AC362443 /* T_Shoes_Terracotta.png */; };
 		9660CE96E44705538947DF53 /* TileMesher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29C95183E216B2953983E0A3 /* TileMesher.swift */; };
-		967600AA5E3370386EDDBC94 /* TripSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F7E8BFDA4EC90F4FDC86F2 /* TripSheet.swift */; };
 		A1547040012349FAD9FFE49D /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 77458C523B64AB6BB58F87DF /* Shaders.metal */; };
 		A8AF19CC3E76C98DD213A817 /* RoutePlanningClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FC8402F196266E76E5D4E6F /* RoutePlanningClient.swift */; };
 		A9D58659868CBC8B8FB8F83D /* GLB.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2C789874DCDBB2546A4A150 /* GLB.swift */; };
@@ -44,6 +43,7 @@
 		BBCA585A8A79E88A09D68491 /* player.glb in Resources */ = {isa = PBXBuildFile; fileRef = 6C801C70002F811BE171AC32 /* player.glb */; };
 		C28A94456E9CFE7557C10B80 /* Geo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CBA1242395BB948908FC24B /* Geo.swift */; };
 		CC62E25D0CFEA8CD494CE7C5 /* RoutePreviewDecoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C647D567807A36B11E060F /* RoutePreviewDecoding.swift */; };
+		E9F2CD33906F086185DF5253 /* TripMapScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC4168DB04FE727BD9382168 /* TripMapScreen.swift */; };
 		F988AD41091936296FF60051 /* PetalPathApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38F2FD176702816D34A1D857 /* PetalPathApp.swift */; };
 		FD630607B7615C6D00ED89D0 /* GameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 387AEE293A00081D1661B7FA /* GameView.swift */; };
 /* End PBXBuildFile section */
@@ -75,9 +75,8 @@
 		4FC8402F196266E76E5D4E6F /* RoutePlanningClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePlanningClient.swift; sourceTree = "<group>"; };
 		535AEAE11095A66432CFFCB7 /* RoutePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutePlan.swift; sourceTree = "<group>"; };
 		60ED404A3CA6A42AE97D65CF /* TileSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TileSource.swift; sourceTree = "<group>"; };
-		66F7E8BFDA4EC90F4FDC86F2 /* TripSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripSheet.swift; sourceTree = "<group>"; };
-		6C801C70002F811BE171AC32 /* player.glb */ = {isa = PBXFileReference; path = player.glb; sourceTree = "<group>"; };
-		72381CC5E213517449FD91DA /* PetalPath.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PetalPath.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6C801C70002F811BE171AC32 /* player.glb */ = {isa = PBXFileReference; lastKnownFileType = file; path = player.glb; sourceTree = "<group>"; };
+		72381CC5E213517449FD91DA /* PetalPath.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PetalPath.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		77458C523B64AB6BB58F87DF /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
 		7B8554E9FAC61016CAAE7981 /* SampleRoutePlanningClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleRoutePlanningClient.swift; sourceTree = "<group>"; };
 		7CBA1242395BB948908FC24B /* Geo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Geo.swift; sourceTree = "<group>"; };
@@ -99,6 +98,7 @@
 		F3448F8692E21DE831F8718F /* T_Shoes_Mustard.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Mustard.png; sourceTree = "<group>"; };
 		F65C3DC340BB1B56AC362443 /* T_Shoes_Terracotta.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = T_Shoes_Terracotta.png; sourceTree = "<group>"; };
 		F9A387F19BFCEF5972259F62 /* PlaceSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceSearch.swift; sourceTree = "<group>"; };
+		FC4168DB04FE727BD9382168 /* TripMapScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripMapScreen.swift; sourceTree = "<group>"; };
 		FC859EDBC68989CA71950CBB /* PetalPathTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PetalPathTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -171,7 +171,7 @@
 				ED94C39827BC294F0858ED88 /* RouteSummaryView.swift */,
 				D392FE1C0B11E2749BBB35FB /* SettingsView.swift */,
 				236514C6330DEAE029811D6A /* TripMaps.swift */,
-				66F7E8BFDA4EC90F4FDC86F2 /* TripSheet.swift */,
+				FC4168DB04FE727BD9382168 /* TripMapScreen.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -363,10 +363,10 @@
 				9660CE96E44705538947DF53 /* TileMesher.swift in Sources */,
 				5BAAC4526A51C95875B73AB1 /* TileSource.swift in Sources */,
 				09FBB6A957B33233CFA04088 /* TripCopy.swift in Sources */,
+				E9F2CD33906F086185DF5253 /* TripMapScreen.swift in Sources */,
 				5394E837A37247524F88BECC /* TripMaps.swift in Sources */,
 				B5E38CE72956DACD62A436B8 /* TripModels.swift in Sources */,
 				5DB7D75FB71A5015DEDACB88 /* TripPlanner.swift in Sources */,
-				967600AA5E3370386EDDBC94 /* TripSheet.swift in Sources */,
 				45EAD3DA75F41AE318FD4BD0 /* Wardrobe.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -397,6 +397,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = PetalPath/Config/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Petal Path";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Petal Path puts your character on the map where you are, and can plan a trip preview from there.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -413,6 +418,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = "PetalPath/Config/Debug-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Petal Path";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Petal Path puts your character on the map where you are, and can plan a trip preview from there.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
